@@ -27,6 +27,7 @@ export function usePlayer() {
   const storeAddToQueue = usePlayerStore((s) => s.addToQueue);
   const storePlayNext = usePlayerStore((s) => s.playNext);
   const storeRemoveFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const storeClearQueue = usePlayerStore((s) => s.clearQueue);
 
   const playTrack = useCallback(
     async (tracks: Track[], startIndex: number) => {
@@ -153,6 +154,11 @@ export function usePlayer() {
     [storeRemoveFromQueue],
   );
 
+  const dismissPlayer = useCallback(async () => {
+    await TrackPlayer.reset();
+    storeClearQueue();
+  }, [storeClearQueue]);
+
   return {
     playTrack,
     play,
@@ -166,5 +172,6 @@ export function usePlayer() {
     addToQueue,
     playNext,
     removeFromQueue,
+    dismissPlayer,
   };
 }

@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   // Categories — gradient tiles
   categoriesContainer: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.huge,
+    paddingBottom: 140,
   },
   browseTitle: {
     fontSize: FontSize.xl,

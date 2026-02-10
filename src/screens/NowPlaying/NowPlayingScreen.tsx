@@ -1,17 +1,21 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Dimensions,
-  Pressable,
-  type GestureResponderEvent,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  runOnJS,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Colors, FontSize, FontWeight, Spacing, BorderRadius, Shadows } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
 import { usePlayer } from '../../hooks';
@@ -25,7 +29,6 @@ interface NowPlayingScreenProps {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ARTWORK_SIZE = SCREEN_WIDTH - Spacing.xxxl * 2;
 const PROGRESS_BAR_HEIGHT = 4;
-const PROGRESS_HIT_SLOP = 12;
 const PLAY_BUTTON_SIZE = 68;
 
 function formatTime(seconds: number): string {
@@ -61,17 +64,63 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
   const isPlaying = playbackState === 'playing';
   const progress = duration > 0 ? position / duration : 0;
 
-  const handleSeek = useCallback(
-    (event: GestureResponderEvent) => {
+  // ── Seek slider state ──
+  const SLIDER_WIDTH = SCREEN_WIDTH - Spacing.xxxl * 2;
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekDisplayPosition, setSeekDisplayPosition] = useState(0);
+  const seekProgress = useSharedValue(0);
+
+  const commitSeek = useCallback(
+    (fraction: number) => {
       if (duration <= 0) return;
-      const { locationX } = event.nativeEvent;
-      const barWidth = SCREEN_WIDTH - Spacing.xxxl * 2;
-      const clamped = Math.max(0, Math.min(locationX, barWidth));
-      const seekPosition = (clamped / barWidth) * duration;
-      seekTo(seekPosition);
+      const pos = fraction * duration;
+      seekTo(pos);
+      setIsSeeking(false);
     },
     [duration, seekTo],
   );
+
+  const updateSeekDisplay = useCallback(
+    (fraction: number) => {
+      setSeekDisplayPosition(fraction * duration);
+    },
+    [duration],
+  );
+
+  const tapGesture = Gesture.Tap().onEnd((event) => {
+    const fraction = Math.max(0, Math.min(event.x / SLIDER_WIDTH, 1));
+    seekProgress.value = fraction;
+    runOnJS(commitSeek)(fraction);
+  });
+
+  const panGesture = Gesture.Pan()
+    .onStart((event) => {
+      const fraction = Math.max(0, Math.min(event.x / SLIDER_WIDTH, 1));
+      seekProgress.value = fraction;
+      runOnJS(setIsSeeking)(true);
+      runOnJS(updateSeekDisplay)(fraction);
+    })
+    .onUpdate((event) => {
+      const fraction = Math.max(0, Math.min(event.x / SLIDER_WIDTH, 1));
+      seekProgress.value = fraction;
+      runOnJS(updateSeekDisplay)(fraction);
+    })
+    .onEnd(() => {
+      runOnJS(commitSeek)(seekProgress.value);
+    });
+
+  const seekGesture = Gesture.Race(panGesture, tapGesture);
+
+  const seekFillStyle = useAnimatedStyle(() => ({
+    width: `${(isSeeking ? seekProgress.value : progress) * 100}%`,
+  }));
+
+  const seekThumbStyle = useAnimatedStyle(() => ({
+    left: `${(isSeeking ? seekProgress.value : progress) * 100}%`,
+  }));
+
+  const displayPosition = isSeeking ? seekDisplayPosition : position;
+  const displayRemaining = duration > 0 ? duration - displayPosition : 0;
 
   // Placeholder state when no track is playing
   if (!currentTrack) {
@@ -156,32 +205,29 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Progress Bar */}
-      <Pressable
-        onPress={handleSeek}
-        style={styles.progressContainer}
-        hitSlop={{ top: PROGRESS_HIT_SLOP, bottom: PROGRESS_HIT_SLOP }}
-      >
-        <View style={styles.progressBackground}>
-          <LinearGradient
-            colors={[Colors.primary, Colors.secondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.progressFill, { width: `${progress * 100}%` }]}
-          />
-          <View
-            style={[
-              styles.progressThumb,
-              { left: `${progress * 100}%` },
-            ]}
-          />
-        </View>
-      </Pressable>
+      {/* Progress Bar — draggable */}
+      <GestureDetector gesture={seekGesture}>
+        <Animated.View style={styles.progressContainer}>
+          <View style={styles.progressBackground}>
+            <Animated.View style={[styles.progressFillContainer, seekFillStyle]}>
+              <LinearGradient
+                colors={['#4F8EF7', Colors.secondary]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.progressFill}
+              />
+            </Animated.View>
+            <Animated.View
+              style={[styles.progressThumb, seekThumbStyle]}
+            />
+          </View>
+        </Animated.View>
+      </GestureDetector>
 
       <View style={styles.timeRow}>
-        <Text style={styles.timeText}>{formatTime(position)}</Text>
+        <Text style={styles.timeText}>{formatTime(displayPosition)}</Text>
         <Text style={styles.timeText}>
-          {duration > 0 ? `-${formatTime(duration - position)}` : '0:00'}
+          {duration > 0 ? `-${formatTime(displayRemaining)}` : '0:00'}
         </Text>
       </View>
 
@@ -346,7 +392,7 @@ const styles = StyleSheet.create({
   // ── Progress ─────────────────────────────────────────
   progressContainer: {
     marginTop: Spacing.xxl,
-    height: PROGRESS_BAR_HEIGHT + PROGRESS_HIT_SLOP * 2,
+    height: 28,
     justifyContent: 'center',
   },
   progressBackground: {
@@ -355,9 +401,13 @@ const styles = StyleSheet.create({
     borderRadius: PROGRESS_BAR_HEIGHT / 2,
     overflow: 'visible',
   },
-  progressFill: {
+  progressFillContainer: {
     height: PROGRESS_BAR_HEIGHT,
     borderRadius: PROGRESS_BAR_HEIGHT / 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    ...StyleSheet.absoluteFillObject,
   },
   progressThumb: {
     position: 'absolute',
@@ -366,7 +416,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: Colors.white,
+    backgroundColor: '#4F8EF7',
     ...Shadows.small,
   },
 

@@ -261,8 +261,8 @@ const HomeScreen: React.FC = () => {
           colors={[Colors.gradientStart, Colors.gradientMid, Colors.gradientEnd]}
           locations={[0, 0.6, 1]}
           style={[styles.gradient, { paddingTop: insets.top }]}
-          start={{ x: 0.2, y: 0 }}
-          end={{ x: 0.8, y: 1 }}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
         >
           {/* ---- Top bar ---- */}
           <View style={styles.topBar}>

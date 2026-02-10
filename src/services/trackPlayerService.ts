@@ -13,7 +13,6 @@ import { Track } from '../types';
 export async function setupPlayer(): Promise<void> {
   try {
     await TrackPlayer.setupPlayer({
-      waitForBuffer: true,
       autoHandleInterruptions: true,
     });
 
@@ -29,12 +28,6 @@ export async function setupPlayer(): Promise<void> {
         Capability.SkipToPrevious,
         Capability.SeekTo,
         Capability.Stop,
-      ],
-      compactCapabilities: [
-        Capability.Play,
-        Capability.Pause,
-        Capability.SkipToNext,
-        Capability.SkipToPrevious,
       ],
     });
   } catch {

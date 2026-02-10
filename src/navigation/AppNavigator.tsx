@@ -1,13 +1,17 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
+  Text,
   StyleSheet,
   Dimensions,
   StatusBar,
   Modal,
+  TouchableOpacity,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -17,9 +21,10 @@ import Animated, {
   interpolate,
   Extrapolation,
   runOnJS,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Colors, Spacing, Layout } from '../theme';
+import { Colors, Spacing, Layout, BorderRadius, FontWeight, Shadows } from '../theme';
 import HomeScreen from '../screens/Home/HomeScreen';
 import SearchScreen from '../screens/Search/SearchScreen';
 import LibraryScreen from '../screens/Library/LibraryScreen';
@@ -57,26 +62,174 @@ const SPRING_CONFIG = {
   restSpeedThreshold: 0.01,
 };
 
-function TabIcon({
-  name,
-  focused,
-  size,
-}: {
-  name: keyof typeof Ionicons.glyphMap;
-  focused: boolean;
-  size: number;
-}) {
+const TAB_ICON_MAP: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }> = {
+  Home: { active: 'home', inactive: 'home-outline' },
+  Search: { active: 'search', inactive: 'search-outline' },
+  'Your Library': { active: 'library', inactive: 'library-outline' },
+};
+
+// ── Floating Tab Bar ─────────────────────────────────────────────────────────
+
+interface FloatingTabBarProps extends BottomTabBarProps {
+  hasMiniPlayer: boolean;
+  onMiniPlayerPress: () => void;
+  translateY: SharedValue<number>;
+}
+
+function FloatingTabBar({
+  state,
+  descriptors,
+  navigation,
+  hasMiniPlayer,
+  onMiniPlayerPress,
+  translateY,
+}: FloatingTabBarProps) {
+  const insets = useSafeAreaInsets();
+
+  // Animate the whole floating bar: fade + slide down as player sheet expands
+  const animatedStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      translateY.value,
+      [SCREEN_HEIGHT * 0.6, SCREEN_HEIGHT],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    const ty = interpolate(
+      translateY.value,
+      [SCREEN_HEIGHT * 0.6, SCREEN_HEIGHT],
+      [40, 0],
+      Extrapolation.CLAMP,
+    );
+    return { opacity, transform: [{ translateY: ty }] };
+  });
+
   return (
-    <Ionicons
-      name={name}
-      size={size}
-      color={focused ? Colors.textPrimary : Colors.textMuted}
-    />
+    <Animated.View
+      style={[
+        floatingStyles.wrapper,
+        { bottom: Math.max(insets.bottom, Spacing.sm) + 6 },
+        animatedStyle,
+      ]}
+    >
+      <BlurView intensity={100} tint="dark" style={floatingStyles.container}>
+        {/* MiniPlayer section — only when a track is active */}
+        {hasMiniPlayer && (
+          <MiniPlayer onPress={onMiniPlayerPress} />
+        )}
+
+        {/* Separator line between mini player and tabs */}
+        {hasMiniPlayer && <View style={floatingStyles.separator} />}
+
+        {/* Tab icons row */}
+        <View style={floatingStyles.tabRow}>
+          {state.routes.map((route, index) => {
+            const { options } = descriptors[route.key];
+            const isFocused = state.index === index;
+            const icons = TAB_ICON_MAP[route.name] ?? { active: 'ellipse', inactive: 'ellipse-outline' };
+            const iconName = isFocused ? icons.active : icons.inactive;
+
+            const label =
+              typeof options.tabBarLabel === 'string'
+                ? options.tabBarLabel
+                : typeof options.title === 'string'
+                  ? options.title
+                  : route.name;
+
+            const onPress = () => {
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
+
+              if (!isFocused && !event.defaultPrevented) {
+                navigation.navigate(route.name);
+              }
+            };
+
+            const onLongPress = () => {
+              navigation.emit({
+                type: 'tabLongPress',
+                target: route.key,
+              });
+            };
+
+            return (
+              <TouchableOpacity
+                key={route.key}
+                accessibilityRole="button"
+                accessibilityState={isFocused ? { selected: true } : {}}
+                accessibilityLabel={options.tabBarAccessibilityLabel}
+                onPress={onPress}
+                onLongPress={onLongPress}
+                style={floatingStyles.tabItem}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={iconName}
+                  size={18}
+                  color={isFocused ? Colors.textPrimary : Colors.textMuted}
+                />
+                <Text
+                  style={[
+                    floatingStyles.tabLabel,
+                    { color: isFocused ? Colors.textPrimary : Colors.textMuted },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </BlurView>
+    </Animated.View>
   );
 }
 
+const floatingStyles = StyleSheet.create({
+  wrapper: {
+    position: 'absolute',
+    left: Spacing.lg,
+    right: Spacing.lg,
+    zIndex: 10,
+  },
+  container: {
+    backgroundColor: 'rgba(15, 25, 65, 0.9)',
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+    ...Shadows.medium,
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xs,
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+    marginTop: 2,
+  },
+});
+
+// ── Main Navigator ───────────────────────────────────────────────────────────
+
 export default function AppNavigator() {
-  const insets = useSafeAreaInsets();
   const currentTrack = usePlayerStore((s) => s.currentTrack);
 
   // Keep TrackPlayer state synced to store globally
@@ -91,8 +244,6 @@ export default function AppNavigator() {
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const context = useSharedValue(0);
 
-  const TAB_BAR_HEIGHT = Layout.tabBarHeight + insets.bottom;
-  const MINI_PLAYER_HEIGHT = Layout.miniPlayerHeight;
   const SNAP_TOP = 0;
   const SNAP_BOTTOM = SCREEN_HEIGHT;
 
@@ -164,29 +315,19 @@ export default function AppNavigator() {
     transform: [{ translateY: translateY.value }],
   }));
 
-  // Animated style for mini player opacity (fade out as sheet comes up)
-  const miniPlayerOpacity = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      translateY.value,
-      [SCREEN_HEIGHT * 0.5, SCREEN_HEIGHT],
-      [0, 1],
-      Extrapolation.CLAMP,
-    );
-    return { opacity };
-  });
-
-  // Animated style for tab bar (slide down as player expands)
-  const tabBarOpacity = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      translateY.value,
-      [SCREEN_HEIGHT * 0.7, SCREEN_HEIGHT],
-      [0, 1],
-      Extrapolation.CLAMP,
-    );
-    return { opacity };
-  });
-
   const hasMiniPlayer = currentTrack !== null;
+
+  const renderTabBar = useCallback(
+    (props: BottomTabBarProps) => (
+      <FloatingTabBar
+        {...props}
+        hasMiniPlayer={hasMiniPlayer}
+        onMiniPlayerPress={expandPlayer}
+        translateY={translateY}
+      />
+    ),
+    [hasMiniPlayer, expandPlayer, translateY],
+  );
 
   return (
     <View style={styles.root}>
@@ -194,80 +335,16 @@ export default function AppNavigator() {
 
       <NavigationContainer theme={DarkTheme}>
         <Tab.Navigator
+          tabBar={renderTabBar}
           screenOptions={{
             headerShown: false,
-            tabBarStyle: {
-              backgroundColor: Colors.surface,
-              borderTopWidth: 0,
-              borderTopColor: Colors.glassBorder,
-              height: TAB_BAR_HEIGHT,
-              paddingBottom: insets.bottom,
-              paddingTop: Spacing.xs,
-              elevation: 0,
-            },
-            tabBarActiveTintColor: Colors.textPrimary,
-            tabBarInactiveTintColor: Colors.textMuted,
-            tabBarLabelStyle: {
-              fontSize: 10,
-              fontWeight: '600',
-              marginTop: 2,
-            },
           }}
         >
-          <Tab.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{
-              tabBarIcon: ({ focused, size }) => (
-                <TabIcon
-                  name={focused ? 'home' : 'home-outline'}
-                  focused={focused}
-                  size={size}
-                />
-              ),
-            }}
-          />
-          <Tab.Screen
-            name="Search"
-            component={SearchScreen}
-            options={{
-              tabBarIcon: ({ focused, size }) => (
-                <TabIcon
-                  name={focused ? 'search' : 'search-outline'}
-                  focused={focused}
-                  size={size}
-                />
-              ),
-            }}
-          />
-          <Tab.Screen
-            name="Your Library"
-            component={LibraryScreen}
-            options={{
-              tabBarIcon: ({ focused, size }) => (
-                <TabIcon
-                  name={focused ? 'library' : 'library-outline'}
-                  focused={focused}
-                  size={size}
-                />
-              ),
-            }}
-          />
+          <Tab.Screen name="Home" component={HomeScreen} />
+          <Tab.Screen name="Search" component={SearchScreen} />
+          <Tab.Screen name="Your Library" component={LibraryScreen} />
         </Tab.Navigator>
       </NavigationContainer>
-
-      {/* Mini Player - above tab bar */}
-      {hasMiniPlayer && (
-        <Animated.View
-          style={[
-            styles.miniPlayerContainer,
-            { bottom: TAB_BAR_HEIGHT },
-            miniPlayerOpacity,
-          ]}
-        >
-          <MiniPlayer onPress={expandPlayer} />
-        </Animated.View>
-      )}
 
       {/* Full Player Sheet - gesture driven */}
       {(isPlayerExpanded || hasMiniPlayer) && (
@@ -322,12 +399,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.background,
-  },
-  miniPlayerContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 10,
   },
   playerSheet: {
     position: 'absolute',

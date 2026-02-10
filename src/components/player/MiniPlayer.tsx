@@ -1,27 +1,69 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors, FontSize, FontWeight, Spacing, BorderRadius, Layout, Shadows } from '../../theme';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Colors, FontWeight, Spacing, BorderRadius, Layout } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
 import { usePlayer } from '../../hooks';
 
 interface MiniPlayerProps {
   onPress: () => void;
+  onDismiss?: () => void;
 }
 
 const MINI_PLAYER_HEIGHT = Layout.miniPlayerHeight;
-const ART_SIZE = 44;
-const PROGRESS_HEIGHT = 3;
+const ART_SIZE = 40;
+const PROGRESS_HEIGHT = 2;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const DISMISS_THRESHOLD = SCREEN_WIDTH * 0.35;
 
-const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
+const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress, onDismiss }) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const playbackState = usePlayerStore((s) => s.playbackState);
   const position = usePlayerStore((s) => s.position);
   const duration = usePlayerStore((s) => s.duration);
 
-  const { togglePlayPause } = usePlayer();
+  const { togglePlayPause, dismissPlayer } = usePlayer();
+
+  const translateX = useSharedValue(0);
+
+  const handleDismiss = () => {
+    dismissPlayer();
+    onDismiss?.();
+  };
+
+  const swipeGesture = Gesture.Pan()
+    .activeOffsetX(15)
+    .failOffsetY([-10, 10])
+    .onUpdate((event) => {
+      // Only allow swiping right
+      translateX.value = Math.max(0, event.translationX);
+    })
+    .onEnd((event) => {
+      if (event.translationX > DISMISS_THRESHOLD || event.velocityX > 600) {
+        // Dismiss: slide out to the right
+        translateX.value = withTiming(SCREEN_WIDTH, { duration: 200 }, () => {
+          runOnJS(handleDismiss)();
+        });
+      } else {
+        // Snap back
+        translateX.value = withSpring(0, { damping: 20, stiffness: 300 });
+      }
+    });
+
+  const swipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+    opacity: 1 - translateX.value / SCREEN_WIDTH,
+  }));
 
   if (!currentTrack) return null;
 
@@ -29,95 +71,89 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
   const progress = duration > 0 ? position / duration : 0;
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.95}
-      onPress={onPress}
-      style={styles.container}
-    >
-      {/* Glass background */}
-      <View style={styles.glassBackground} />
-
-      {/* Main content row */}
-      <View style={styles.content}>
-        {/* Album art */}
-        <Image
-          source={currentTrack.artwork}
-          style={styles.artwork}
-          contentFit="cover"
-          transition={200}
-        />
-
-        {/* Track info */}
-        <View style={styles.trackInfo}>
-          <Text style={styles.title} numberOfLines={1}>
-            {currentTrack.title}
-          </Text>
-          <Text style={styles.artist} numberOfLines={1}>
-            {currentTrack.artist}
-          </Text>
-        </View>
-
-        {/* Right controls */}
-        <TouchableOpacity hitSlop={12} style={styles.iconButton}>
-          <Ionicons
-            name="phone-portrait-outline"
-            size={16}
-            color={Colors.textSecondary}
-          />
-        </TouchableOpacity>
-
+    <GestureDetector gesture={swipeGesture}>
+      <Animated.View style={[styles.container, swipeStyle]}>
         <TouchableOpacity
-          onPress={(e) => {
-            e.stopPropagation();
-            togglePlayPause();
-          }}
-          hitSlop={12}
-          style={styles.playPauseButton}
+          activeOpacity={0.95}
+          onPress={onPress}
+          style={styles.touchable}
         >
-          <Ionicons
-            name={isPlaying ? 'pause' : 'play'}
-            size={20}
-            color={Colors.white}
-          />
-        </TouchableOpacity>
-      </View>
+          {/* Main content row */}
+          <View style={styles.content}>
+            {/* Album art */}
+            <Image
+              source={currentTrack.artwork}
+              style={styles.artwork}
+              contentFit="cover"
+              transition={200}
+            />
 
-      {/* Gradient progress bar at bottom edge */}
-      <View style={styles.progressBarContainer}>
-        <LinearGradient
-          colors={[Colors.primary, Colors.secondary]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={[
-            styles.progressBarFill,
-            { width: `${progress * 100}%` },
-          ]}
-        />
-      </View>
-    </TouchableOpacity>
+            {/* Track info */}
+            <View style={styles.trackInfo}>
+              <Text style={styles.title} numberOfLines={1}>
+                {currentTrack.title}
+              </Text>
+              <Text style={styles.artist} numberOfLines={1}>
+                {currentTrack.artist}
+              </Text>
+            </View>
+
+            {/* Right controls */}
+            <TouchableOpacity hitSlop={12} style={styles.iconButton}>
+              <Ionicons
+                name="phone-portrait-outline"
+                size={16}
+                color={Colors.textSecondary}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                togglePlayPause();
+              }}
+              hitSlop={12}
+              style={styles.playPauseButton}
+            >
+              <Ionicons
+                name={isPlaying ? 'pause' : 'play'}
+                size={20}
+                color={Colors.white}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* Gradient progress bar at bottom edge */}
+          <View style={styles.progressBarContainer}>
+            <LinearGradient
+              colors={['#4F8EF7', Colors.secondary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[
+                styles.progressBarFill,
+                { width: `${progress * 100}%` },
+              ]}
+            />
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </GestureDetector>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     height: MINI_PLAYER_HEIGHT,
-    borderRadius: BorderRadius.md,
-    marginHorizontal: Spacing.sm,
     overflow: 'hidden',
-    ...Shadows.small,
   },
-  glassBackground: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: Colors.surfaceLight,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    borderRadius: BorderRadius.md,
+  touchable: {
+    flex: 1,
   },
   content: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
   artwork: {
     width: ART_SIZE,
@@ -147,9 +183,9 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
   },
   playPauseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: Colors.glass,
     alignItems: 'center',
     justifyContent: 'center',
