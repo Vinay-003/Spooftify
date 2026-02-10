@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Spooftify",
+    "slug": "Spooftify",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#121212"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.spooftify.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#121212"
+      },
+      "package": "com.spooftify.app",
+      "permissions": ["FOREGROUND_SERVICE", "WAKE_LOCK"]
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "react-native-track-player",
+        {
+          "android": {
+            "stopForegroundServiceOnLockScreenRemoval": false
+          }
+        }
+      ]
+    ]
+  }
+}
