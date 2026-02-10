@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../../theme';
 import { Track } from '../../types';
 import usePlayerStore from '../../store/playerStore';
+import TrackContextMenu from './TrackContextMenu';
 
 interface TrackRowProps {
   track: Track;
@@ -30,64 +31,89 @@ const TrackRow: React.FC<TrackRowProps> = ({
 }) => {
   const currentTrackId = usePlayerStore((s) => s.currentTrack?.id);
   const isPlaying = currentTrackId === track.id;
+  const [menuVisible, setMenuVisible] = useState(false);
 
-  const handleMenuPress = useCallback(() => {
-    // Menu action placeholder
+  const openMenu = useCallback(() => {
+    setMenuVisible(true);
   }, []);
 
+  const closeMenu = useCallback(() => {
+    setMenuVisible(false);
+  }, []);
+
+  const handleLongPress = useCallback(() => {
+    if (onLongPress) {
+      onLongPress();
+    } else {
+      openMenu();
+    }
+  }, [onLongPress, openMenu]);
+
   return (
-    <TouchableOpacity
-      style={styles.container}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      activeOpacity={0.6}
-    >
-      {showIndex && index != null ? (
-        <View style={styles.indexContainer}>
+    <>
+      <TouchableOpacity
+        style={styles.container}
+        onPress={onPress}
+        onLongPress={handleLongPress}
+        activeOpacity={0.6}
+      >
+        {showIndex && index != null ? (
+          <View style={styles.indexContainer}>
+            <Text
+              style={[
+                styles.indexText,
+                isPlaying && styles.activeText,
+              ]}
+            >
+              {index}
+            </Text>
+          </View>
+        ) : showArtwork ? (
+          <View style={styles.artworkContainer}>
+            <Image
+              source={
+                typeof track.artwork === 'string'
+                  ? { uri: track.artwork }
+                  : track.artwork
+              }
+              style={styles.artwork}
+              contentFit="cover"
+              transition={200}
+            />
+          </View>
+        ) : null}
+
+        <View style={styles.info}>
           <Text
-            style={[
-              styles.indexText,
-              isPlaying && styles.activeText,
-            ]}
+            style={[styles.title, isPlaying && styles.activeText]}
+            numberOfLines={1}
           >
-            {index}
+            {track.title}
+          </Text>
+          <Text style={styles.artist} numberOfLines={1}>
+            {track.artist}
           </Text>
         </View>
-      ) : showArtwork ? (
-        <View style={styles.artworkContainer}>
-          <Image
-            source={track.artwork}
-            style={styles.artwork}
-            contentFit="cover"
-            transition={200}
-          />
-        </View>
-      ) : null}
 
-      <View style={styles.info}>
-        <Text
-          style={[styles.title, isPlaying && styles.activeText]}
-          numberOfLines={1}
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={openMenu}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          {track.title}
-        </Text>
-        <Text style={styles.artist} numberOfLines={1}>
-          {track.artist}
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.menuButton}
-        onPress={handleMenuPress}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Ionicons
-          name="ellipsis-horizontal"
-          size={18}
-          color={Colors.textMuted}
-        />
+          <Ionicons
+            name="ellipsis-horizontal"
+            size={18}
+            color={Colors.textMuted}
+          />
+        </TouchableOpacity>
       </TouchableOpacity>
-    </TouchableOpacity>
+
+      <TrackContextMenu
+        track={track}
+        visible={menuVisible}
+        onClose={closeMenu}
+      />
+    </>
   );
 };
 

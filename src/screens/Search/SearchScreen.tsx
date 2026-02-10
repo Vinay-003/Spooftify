@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,19 +7,23 @@ import {
   FlatList,
   TouchableOpacity,
   Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius, Shadows } from '../../theme';
-import { DEMO_TRACKS, SEARCH_CATEGORIES } from '../../data/tracks';
+import { SEARCH_CATEGORIES } from '../../data/tracks';
 import { TrackRow } from '../../components/common';
 import { usePlayer } from '../../hooks';
+import { searchYTMusic, getSearchSuggestions, ytResultToTrack } from '../../services/youtube';
 import type { Track, Category } from '../../types';
 
 const COLUMN_GAP = Spacing.md;
 const NUM_COLUMNS = 2;
+
+// Debounce delay for suggestions
+const SUGGESTION_DEBOUNCE = 250;
 
 // Color pairs for category gradient tiles
 const CATEGORY_GRADIENTS: Record<string, [string, string]> = {
@@ -39,33 +43,120 @@ const CATEGORY_GRADIENTS: Record<string, [string, string]> = {
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
-  const { playTrack } = usePlayer();
+  const { playTrackWithRecommendations } = usePlayer();
   const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Track[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const suggestionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSearching = query.length > 0;
 
-  const filteredTracks = useMemo(() => {
-    if (!isSearching) return [];
-    const q = query.toLowerCase();
-    return DEMO_TRACKS.filter(
-      (track) =>
-        track.title.toLowerCase().includes(q) ||
-        track.artist.toLowerCase().includes(q),
-    );
+  // Debounced search suggestions
+  useEffect(() => {
+    if (!isSearching) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    if (suggestionTimeout.current) clearTimeout(suggestionTimeout.current);
+
+    suggestionTimeout.current = setTimeout(async () => {
+      try {
+        const results = await getSearchSuggestions(query);
+        setSuggestions(results.slice(0, 6));
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      }
+    }, SUGGESTION_DEBOUNCE);
+
+    return () => {
+      if (suggestionTimeout.current) clearTimeout(suggestionTimeout.current);
+    };
   }, [query, isSearching]);
 
-  const handleTrackPress = useCallback(
-    (track: Track, index: number) => {
-      Keyboard.dismiss();
-      playTrack(filteredTracks, index);
+  // Perform actual search
+  const performSearch = useCallback(async (searchQuery: string) => {
+    if (!searchQuery.trim()) return;
+
+    setIsLoading(true);
+    setHasSearched(true);
+    setShowSuggestions(false);
+    Keyboard.dismiss();
+
+    try {
+      const results = await searchYTMusic(searchQuery);
+      const tracks = results.map(ytResultToTrack);
+      setSearchResults(tracks);
+    } catch (err) {
+      console.warn('[Search] Failed:', err);
+      setSearchResults([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Update query text — no auto-search, only suggestions
+  const handleTextChange = useCallback(
+    (text: string) => {
+      setQuery(text);
+
+      if (!text.trim()) {
+        setSearchResults([]);
+        setHasSearched(false);
+        setShowSuggestions(false);
+        return;
+      }
     },
-    [playTrack, filteredTracks],
+    [],
+  );
+
+  const handleSuggestionPress = useCallback(
+    (suggestion: string) => {
+      setQuery(suggestion);
+      setSuggestions([]);
+      setShowSuggestions(false);
+      performSearch(suggestion);
+    },
+    [performSearch],
+  );
+
+  const handleCategoryPress = useCallback(
+    (category: Category) => {
+      setQuery(category.name);
+      performSearch(category.name);
+    },
+    [performSearch],
+  );
+
+  const handleTrackPress = useCallback(
+    (track: Track, _index: number) => {
+      Keyboard.dismiss();
+      setShowSuggestions(false);
+      playTrackWithRecommendations(track);
+    },
+    [playTrackWithRecommendations],
   );
 
   const handleClearSearch = useCallback(() => {
     setQuery('');
+    setSearchResults([]);
+    setHasSearched(false);
+    setSuggestions([]);
+    setShowSuggestions(false);
     Keyboard.dismiss();
   }, []);
+
+  const handleSubmitEditing = useCallback(() => {
+    if (query.trim()) {
+      performSearch(query);
+    }
+  }, [query, performSearch]);
 
   const renderTrackItem = useCallback(
     ({ item, index }: { item: Track; index: number }) => (
@@ -86,6 +177,7 @@ export default function SearchScreen() {
           <TouchableOpacity
             style={styles.categoryTile}
             activeOpacity={0.7}
+            onPress={() => handleCategoryPress(item)}
           >
             <LinearGradient
               colors={gradient}
@@ -106,29 +198,30 @@ export default function SearchScreen() {
         </View>
       );
     },
-    [],
+    [handleCategoryPress],
   );
 
   const trackKeyExtractor = useCallback((item: Track) => item.id, []);
   const categoryKeyExtractor = useCallback((item: Category) => item.id, []);
 
   const ListEmptyResults = useMemo(
-    () => (
-      <View style={styles.emptyContainer}>
-        <View style={styles.emptyIconContainer}>
-          <Ionicons
-            name="search-outline"
-            size={40}
-            color={Colors.textMuted}
-          />
+    () =>
+      hasSearched && !isLoading ? (
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconContainer}>
+            <Ionicons
+              name="search-outline"
+              size={40}
+              color={Colors.textMuted}
+            />
+          </View>
+          <Text style={styles.emptyTitle}>No results found</Text>
+          <Text style={styles.emptySubtitle}>
+            Try searching for something else
+          </Text>
         </View>
-        <Text style={styles.emptyTitle}>No results found</Text>
-        <Text style={styles.emptySubtitle}>
-          Try searching for something else
-        </Text>
-      </View>
-    ),
-    [],
+      ) : null,
+    [hasSearched, isLoading],
   );
 
   const CategoriesHeader = useMemo(
@@ -148,18 +241,24 @@ export default function SearchScreen() {
       {/* Search Bar */}
       <View style={styles.searchBarContainer}>
         <View style={styles.searchBar}>
-          <Ionicons
-            name="search"
-            size={18}
-            color={Colors.textMuted}
-            style={styles.searchIcon}
-          />
+          <TouchableOpacity
+            onPress={() => { if (query.trim()) performSearch(query); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={Colors.textMuted}
+              style={styles.searchIcon}
+            />
+          </TouchableOpacity>
           <TextInput
             style={styles.searchInput}
-            placeholder="What do you want to listen to?"
+            placeholder="Search songs, artists..."
             placeholderTextColor={Colors.textMuted}
             value={query}
-            onChangeText={setQuery}
+            onChangeText={handleTextChange}
+            onSubmitEditing={handleSubmitEditing}
             returnKeyType="search"
             autoCapitalize="none"
             autoCorrect={false}
@@ -176,18 +275,57 @@ export default function SearchScreen() {
         </View>
       </View>
 
+      {/* Search Suggestions */}
+      {showSuggestions && suggestions.length > 0 && (
+        <View style={styles.suggestionsContainer}>
+          {suggestions.map((suggestion, index) => (
+            <TouchableOpacity
+              key={`${suggestion}-${index}`}
+              style={styles.suggestionItem}
+              onPress={() => handleSuggestionPress(suggestion)}
+              activeOpacity={0.6}
+            >
+              <Ionicons
+                name="search-outline"
+                size={16}
+                color={Colors.textMuted}
+                style={styles.suggestionIcon}
+              />
+              <Text style={styles.suggestionText} numberOfLines={1}>
+                {suggestion}
+              </Text>
+              <Ionicons
+                name="arrow-up-outline"
+                size={16}
+                color={Colors.textMuted}
+                style={{ transform: [{ rotate: '-45deg' }] }}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* Content */}
-      {isSearching ? (
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Searching...</Text>
+        </View>
+      ) : isSearching && hasSearched ? (
         <FlatList
-          data={filteredTracks}
+          key="search-results"
+          data={searchResults}
           renderItem={renderTrackItem}
           keyExtractor={trackKeyExtractor}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={ListEmptyResults}
-          contentContainerStyle={filteredTracks.length === 0 && styles.emptyList}
+          contentContainerStyle={
+            searchResults.length === 0 ? styles.emptyList : styles.resultsList
+          }
         />
       ) : (
         <FlatList
+          key="categories-grid"
           data={SEARCH_CATEGORIES}
           renderItem={renderCategoryItem}
           keyExtractor={categoryKeyExtractor}
@@ -248,6 +386,47 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     marginLeft: Spacing.sm,
+  },
+
+  // Suggestions
+  suggestionsContainer: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: 2,
+  },
+  suggestionIcon: {
+    marginRight: Spacing.md,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: FontSize.md,
+    color: Colors.textPrimary,
+    fontWeight: FontWeight.medium,
+  },
+
+  // Loading
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 100,
+  },
+  loadingText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    marginTop: Spacing.md,
+  },
+
+  // Results
+  resultsList: {
+    paddingBottom: 140,
   },
 
   // Categories — gradient tiles

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,36 +30,75 @@ interface QueueScreenProps {
 const QueueTrackRow = React.memo(
   ({
     track,
-    queueIndex,
     onPress,
     onRemove,
+    onMoveUp,
+    onMoveDown,
+    canMoveUp,
+    canMoveDown,
   }: {
     track: Track;
-    queueIndex: number;
     onPress: () => void;
     onRemove: () => void;
+    onMoveUp?: () => void;
+    onMoveDown?: () => void;
+    canMoveUp?: boolean;
+    canMoveDown?: boolean;
   }) => (
-    <TouchableOpacity
-      style={styles.trackRow}
-      activeOpacity={0.6}
-      onPress={onPress}
-    >
-      <View style={styles.trackArtworkContainer}>
-        <Image
-          source={track.artwork}
-          style={styles.trackArtwork}
-          contentFit="cover"
-          transition={200}
-        />
-      </View>
-      <View style={styles.trackInfo}>
-        <Text style={styles.trackTitle} numberOfLines={1}>
-          {track.title}
-        </Text>
-        <Text style={styles.trackArtist} numberOfLines={1}>
-          {track.artist}
-        </Text>
-      </View>
+    <View style={styles.trackRow}>
+      {/* Reorder buttons */}
+      {(onMoveUp || onMoveDown) && (
+        <View style={styles.reorderButtons}>
+          <TouchableOpacity
+            onPress={onMoveUp}
+            disabled={!canMoveUp}
+            hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
+            style={styles.reorderBtn}
+          >
+            <Ionicons
+              name="chevron-up"
+              size={16}
+              color={canMoveUp ? Colors.textSecondary : Colors.textDisabled}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onMoveDown}
+            disabled={!canMoveDown}
+            hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
+            style={styles.reorderBtn}
+          >
+            <Ionicons
+              name="chevron-down"
+              size={16}
+              color={canMoveDown ? Colors.textSecondary : Colors.textDisabled}
+            />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={styles.trackRowContent}
+        activeOpacity={0.6}
+        onPress={onPress}
+      >
+        <View style={styles.trackArtworkContainer}>
+          <Image
+            source={typeof track.artwork === 'string' ? { uri: track.artwork } : track.artwork}
+            style={styles.trackArtwork}
+            contentFit="cover"
+            recyclingKey={track.id}
+          />
+        </View>
+        <View style={styles.trackInfo}>
+          <Text style={styles.trackTitle} numberOfLines={1}>
+            {track.title}
+          </Text>
+          <Text style={styles.trackArtist} numberOfLines={1}>
+            {track.artist}
+          </Text>
+        </View>
+      </TouchableOpacity>
+
       <TouchableOpacity
         style={styles.removeButton}
         hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -71,7 +110,7 @@ const QueueTrackRow = React.memo(
           color={Colors.textMuted}
         />
       </TouchableOpacity>
-    </TouchableOpacity>
+    </View>
   ),
 );
 
@@ -80,9 +119,19 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const queue = usePlayerStore((s) => s.queue);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
-  const { playTrack, removeFromQueue } = usePlayer();
+  const userQueueCount = usePlayerStore((s) => s.userQueueCount);
+  const { playTrack, removeFromQueue, reorderQueue } = usePlayer();
 
-  const upcomingTracks = queue.slice(currentIndex + 1);
+  // Memoize derived arrays to avoid re-creating on every progress update.
+  // Only recompute when queue contents, currentIndex, or userQueueCount change.
+  const userQueueTracks = useMemo(
+    () => queue.slice(currentIndex + 1, currentIndex + 1 + userQueueCount),
+    [queue, currentIndex, userQueueCount],
+  );
+  const upNextTracks = useMemo(
+    () => queue.slice(currentIndex + 1 + userQueueCount),
+    [queue, currentIndex, userQueueCount],
+  );
 
   const handleSkipTo = useCallback(
     async (track: Track, indexInUpcoming: number) => {
@@ -100,16 +149,66 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
     [currentIndex, removeFromQueue],
   );
 
+  const handleMoveUp = useCallback(
+    async (indexInUserQueue: number) => {
+      if (indexInUserQueue <= 0) return;
+      const fromAbsolute = currentIndex + 1 + indexInUserQueue;
+      const toAbsolute = currentIndex + 1 + (indexInUserQueue - 1);
+      await reorderQueue(fromAbsolute, toAbsolute);
+    },
+    [currentIndex, reorderQueue],
+  );
+
+  const handleMoveDown = useCallback(
+    async (indexInUserQueue: number) => {
+      if (indexInUserQueue >= userQueueCount - 1) return;
+      const fromAbsolute = currentIndex + 1 + indexInUserQueue;
+      const toAbsolute = currentIndex + 1 + (indexInUserQueue + 1);
+      await reorderQueue(fromAbsolute, toAbsolute);
+    },
+    [currentIndex, userQueueCount, reorderQueue],
+  );
+
+  // Reorder within the Up Next (recommendations) section
+  const handleUpNextMoveUp = useCallback(
+    async (indexInUpNext: number) => {
+      if (indexInUpNext <= 0) return;
+      const fromAbsolute = currentIndex + 1 + userQueueCount + indexInUpNext;
+      const toAbsolute = currentIndex + 1 + userQueueCount + (indexInUpNext - 1);
+      await reorderQueue(fromAbsolute, toAbsolute);
+    },
+    [currentIndex, userQueueCount, reorderQueue],
+  );
+
+  const handleUpNextMoveDown = useCallback(
+    async (indexInUpNext: number) => {
+      const upNextLength = queue.length - (currentIndex + 1 + userQueueCount);
+      if (indexInUpNext >= upNextLength - 1) return;
+      const fromAbsolute = currentIndex + 1 + userQueueCount + indexInUpNext;
+      const toAbsolute = currentIndex + 1 + userQueueCount + (indexInUpNext + 1);
+      await reorderQueue(fromAbsolute, toAbsolute);
+    },
+    [currentIndex, userQueueCount, queue.length, reorderQueue],
+  );
+
   const renderUpcomingTrack = useCallback(
-    ({ item, index }: ListRenderItemInfo<Track>) => (
-      <QueueTrackRow
-        track={item}
-        queueIndex={index}
-        onPress={() => handleSkipTo(item, index)}
-        onRemove={() => handleRemove(index)}
-      />
-    ),
-    [handleSkipTo, handleRemove],
+    ({ item, index }: ListRenderItemInfo<Track>) => {
+      // Offset index by userQueueCount since Up Next tracks come after user queue
+      const upcomingIndex = userQueueCount + index;
+      const upNextLength = queue.length - (currentIndex + 1 + userQueueCount);
+      return (
+        <QueueTrackRow
+          track={item}
+          onPress={() => handleSkipTo(item, upcomingIndex)}
+          onRemove={() => handleRemove(upcomingIndex)}
+          onMoveUp={() => handleUpNextMoveUp(index)}
+          onMoveDown={() => handleUpNextMoveDown(index)}
+          canMoveUp={index > 0}
+          canMoveDown={index < upNextLength - 1}
+        />
+      );
+    },
+    [handleSkipTo, handleRemove, handleUpNextMoveUp, handleUpNextMoveDown, userQueueCount, queue.length, currentIndex],
   );
 
   const keyExtractor = useCallback(
@@ -126,10 +225,10 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
           <View style={styles.nowPlayingRow}>
             <View style={styles.trackArtworkContainer}>
               <Image
-                source={currentTrack.artwork}
+                source={typeof currentTrack.artwork === 'string' ? { uri: currentTrack.artwork } : currentTrack.artwork}
                 style={styles.trackArtwork}
                 contentFit="cover"
-                transition={200}
+                recyclingKey={currentTrack.id}
               />
             </View>
             <View style={styles.trackInfo}>
@@ -145,15 +244,36 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
           <Text style={styles.emptyText}>Nothing is playing</Text>
         )}
 
-        {/* Next in Queue Section Header */}
-        {upcomingTracks.length > 0 && (
+        {/* My Queue Section (user-added tracks) with reorder controls */}
+        {userQueueTracks.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, styles.nextSectionLabel]}>
+              MY QUEUE
+            </Text>
+            {userQueueTracks.map((track, index) => (
+              <QueueTrackRow
+                key={`user-${track.id}-${index}`}
+                track={track}
+                onPress={() => handleSkipTo(track, index)}
+                onRemove={() => handleRemove(index)}
+                onMoveUp={() => handleMoveUp(index)}
+                onMoveDown={() => handleMoveDown(index)}
+                canMoveUp={index > 0}
+                canMoveDown={index < userQueueTracks.length - 1}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Up Next Section Header (recommendations) */}
+        {upNextTracks.length > 0 && (
           <Text style={[styles.sectionLabel, styles.nextSectionLabel]}>
-            NEXT IN QUEUE
+            UP NEXT
           </Text>
         )}
       </View>
     ),
-    [currentTrack, upcomingTracks.length],
+    [currentTrack, userQueueTracks, upNextTracks.length, handleSkipTo, handleRemove, handleMoveUp, handleMoveDown],
   );
 
   const ListEmpty = useCallback(
@@ -195,13 +315,13 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Queue List */}
+      {/* Queue List — Up Next (recommendations) section */}
       <FlatList
-        data={upcomingTracks}
+        data={upNextTracks}
         renderItem={renderUpcomingTrack}
         keyExtractor={keyExtractor}
         ListHeaderComponent={ListHeader}
-        ListEmptyComponent={ListEmpty}
+        ListEmptyComponent={userQueueTracks.length === 0 ? ListEmpty : null}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
@@ -270,6 +390,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Spacing.sm,
+  },
+  trackRowContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reorderButtons: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: Spacing.sm,
+    width: 24,
+  },
+  reorderBtn: {
+    paddingVertical: 2,
   },
   trackArtworkContainer: {
     borderRadius: BorderRadius.sm,

@@ -23,7 +23,7 @@ const PlaylistCard: React.FC<PlaylistCardProps> = ({
     >
       <View style={styles.artworkContainer}>
         <Image
-          source={playlist.artwork}
+          source={typeof playlist.artwork === 'string' ? { uri: playlist.artwork } : playlist.artwork}
           style={[
             styles.artwork,
             { width: size, height: size },

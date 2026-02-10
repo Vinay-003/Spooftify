@@ -1,12 +1,13 @@
 export interface Track {
-  id: string;
+  id: string; // videoId for YT tracks, arbitrary for local
   title: string;
   artist: string;
   album: string;
-  artwork: any; // require() for local, string for remote
-  url: any; // require() for local, string for remote
+  artwork: any; // require() for local, string URL for remote
+  url: any; // require() for local, string URL for remote (resolved lazily for YT)
   duration: number; // seconds
   lyrics?: LyricLine[];
+  isYT?: boolean; // true if this track streams from YouTube
 }
 
 export interface LyricLine {

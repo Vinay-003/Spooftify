@@ -38,6 +38,7 @@ interface PlayerState {
   queue: Track[];
   originalQueue: Track[];
   currentIndex: number;
+  userQueueCount: number; // Number of user-added tracks right after currentIndex
   playbackState: 'idle' | 'loading' | 'playing' | 'paused' | 'stopped';
   position: number;
   duration: number;
@@ -52,13 +53,16 @@ interface PlayerState {
   setQueue: (tracks: Track[], startIndex?: number) => void;
   setPlaybackState: (state: PlayerState['playbackState']) => void;
   setProgress: (position: number, duration: number, buffered: number) => void;
+  syncCurrentIndex: (trackId: string) => void;
   toggleRepeatMode: () => void;
   toggleShuffle: () => void;
   skipToNext: () => void;
   skipToPrevious: () => void;
   addToQueue: (track: Track) => void;
+  addToUpNext: (track: Track) => void;
   playNext: (track: Track) => void;
   removeFromQueue: (index: number) => void;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
   addToRecentlyPlayed: (track: Track) => void;
   loadRecentlyPlayed: () => void;
   clearQueue: () => void;
@@ -70,6 +74,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
   queue: [],
   originalQueue: [],
   currentIndex: -1,
+  userQueueCount: 0,
   playbackState: 'idle',
   position: 0,
   duration: 0,
@@ -89,6 +94,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
       originalQueue: [...tracks],
       currentIndex: startIndex,
       currentTrack: tracks[startIndex] ?? null,
+      userQueueCount: 0,
     });
   },
 
@@ -98,6 +104,38 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
 
   setProgress: (position: number, duration: number, buffered: number) => {
     set({ position, duration, buffered });
+  },
+
+  /**
+   * Sync currentIndex from TrackPlayer's active track. Called by
+   * useTrackProgress when the active track changes. This is the single
+   * source of truth for which track is currently playing, preventing
+   * desync between Zustand and TrackPlayer's internal queue index.
+   */
+  syncCurrentIndex: (trackId: string) => {
+    const { queue, currentIndex } = get();
+    const newIndex = queue.findIndex((t) => t.id === trackId);
+    if (newIndex !== -1 && newIndex !== currentIndex) {
+      // If we moved forward past user-queue tracks, decrement userQueueCount
+      const { userQueueCount } = get();
+      let newUserQueueCount = userQueueCount;
+      if (newIndex > currentIndex && userQueueCount > 0) {
+        // How many user-queue tracks did we skip over?
+        const userQueueStart = currentIndex + 1;
+        const userQueueEnd = userQueueStart + userQueueCount;
+        // The new track was within the user queue range
+        if (newIndex >= userQueueStart && newIndex < userQueueEnd) {
+          newUserQueueCount = userQueueCount - (newIndex - currentIndex);
+          if (newUserQueueCount < 0) newUserQueueCount = 0;
+        }
+      }
+
+      set({
+        currentIndex: newIndex,
+        currentTrack: queue[newIndex],
+        userQueueCount: newUserQueueCount,
+      });
+    }
   },
 
   toggleRepeatMode: () => {
@@ -142,7 +180,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   skipToNext: () => {
-    const { queue, currentIndex, repeatMode } = get();
+    const { queue, currentIndex, repeatMode, userQueueCount } = get();
     if (queue.length === 0) return;
 
     let nextIndex: number;
@@ -165,6 +203,10 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
       currentIndex: nextIndex,
       currentTrack: queue[nextIndex],
       position: 0,
+      // If we consumed a user-queue track, decrement the count
+      userQueueCount: userQueueCount > 0 && repeatMode !== 'track'
+        ? userQueueCount - 1
+        : userQueueCount,
     });
   },
 
@@ -200,13 +242,33 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
     });
   },
 
+  // Add to user queue (after current + existing user queue, before recommendations)
   addToQueue: (track: Track) => {
+    set((state) => {
+      const insertIndex = state.currentIndex + 1 + state.userQueueCount;
+      const newQueue = [...state.queue];
+      newQueue.splice(insertIndex, 0, track);
+
+      const newOriginalQueue = [...state.originalQueue];
+      newOriginalQueue.splice(insertIndex, 0, track);
+
+      return {
+        queue: newQueue,
+        originalQueue: newOriginalQueue,
+        userQueueCount: state.userQueueCount + 1,
+      };
+    });
+  },
+
+  // Add to Up Next (recommendations) — appended after user queue
+  addToUpNext: (track: Track) => {
     set((state) => ({
       queue: [...state.queue, track],
       originalQueue: [...state.originalQueue, track],
     }));
   },
 
+  // Play Next: insert right after current track (at start of user queue)
   playNext: (track: Track) => {
     set((state) => {
       const insertIndex = state.currentIndex + 1;
@@ -219,6 +281,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
       return {
         queue: newQueue,
         originalQueue: newOriginalQueue,
+        userQueueCount: state.userQueueCount + 1,
       };
     });
   },
@@ -235,6 +298,14 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
         (t) => t.id !== removedTrack.id,
       );
 
+      // Check if the removed track was in the user queue range
+      const userQueueStart = state.currentIndex + 1;
+      const userQueueEnd = userQueueStart + state.userQueueCount;
+      const wasUserQueueTrack = index >= userQueueStart && index < userQueueEnd;
+      const newUserQueueCount = wasUserQueueTrack
+        ? state.userQueueCount - 1
+        : state.userQueueCount;
+
       let newIndex = state.currentIndex;
       if (index < state.currentIndex) {
         // Removed track was before current: shift index back
@@ -248,6 +319,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
             currentIndex: -1,
             currentTrack: null,
             playbackState: 'idle' as const,
+            userQueueCount: 0,
           };
         }
         // Clamp index to new queue bounds
@@ -257,6 +329,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
           originalQueue: newOriginalQueue,
           currentIndex: newIndex,
           currentTrack: newQueue[newIndex],
+          userQueueCount: newUserQueueCount,
         };
       }
 
@@ -264,6 +337,43 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
         queue: newQueue,
         originalQueue: newOriginalQueue,
         currentIndex: newIndex,
+        userQueueCount: newUserQueueCount,
+      };
+    });
+  },
+
+  // Reorder tracks within the queue (absolute indices)
+  reorderQueue: (fromIndex: number, toIndex: number) => {
+    set((state) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        fromIndex >= state.queue.length ||
+        toIndex < 0 ||
+        toIndex >= state.queue.length
+      ) {
+        return state;
+      }
+
+      const newQueue = [...state.queue];
+      const [moved] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, moved);
+
+      // Adjust currentIndex if needed
+      let newCurrentIndex = state.currentIndex;
+      if (fromIndex === state.currentIndex) {
+        newCurrentIndex = toIndex;
+      } else {
+        if (fromIndex < state.currentIndex && toIndex >= state.currentIndex) {
+          newCurrentIndex = state.currentIndex - 1;
+        } else if (fromIndex > state.currentIndex && toIndex <= state.currentIndex) {
+          newCurrentIndex = state.currentIndex + 1;
+        }
+      }
+
+      return {
+        queue: newQueue,
+        currentIndex: newCurrentIndex,
       };
     });
   },
@@ -308,6 +418,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
       position: 0,
       duration: 0,
       buffered: 0,
+      userQueueCount: 0,
     });
   },
 }));

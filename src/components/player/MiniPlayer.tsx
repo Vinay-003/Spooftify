@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -68,6 +68,7 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress, onDismiss }) => {
   if (!currentTrack) return null;
 
   const isPlaying = playbackState === 'playing';
+  const isBuffering = playbackState === 'loading';
   const progress = duration > 0 ? position / duration : 0;
 
   return (
@@ -82,7 +83,7 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress, onDismiss }) => {
           <View style={styles.content}>
             {/* Album art */}
             <Image
-              source={currentTrack.artwork}
+              source={typeof currentTrack.artwork === 'string' ? { uri: currentTrack.artwork } : currentTrack.artwork}
               style={styles.artwork}
               contentFit="cover"
               transition={200}
@@ -110,16 +111,20 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress, onDismiss }) => {
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
-                togglePlayPause();
+                if (!isBuffering) togglePlayPause();
               }}
               hitSlop={12}
               style={styles.playPauseButton}
             >
-              <Ionicons
-                name={isPlaying ? 'pause' : 'play'}
-                size={20}
-                color={Colors.white}
-              />
+              {isBuffering ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <Ionicons
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={20}
+                  color={Colors.white}
+                />
+              )}
             </TouchableOpacity>
           </View>
 

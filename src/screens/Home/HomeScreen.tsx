@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   FlatList,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -25,12 +26,65 @@ import {
   DEMO_PLAYLISTS,
   getPlaylistTracks,
 } from '../../data/tracks';
-import { SectionHeader, PlaylistCard, TrackRow } from '../../components/common';
+import { SectionHeader, PlaylistCard, TrackRow, TrackContextMenu } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import usePlayerStore from '../../store/playerStore';
+import {
+  getHomeFeed,
+  searchYTMusic,
+  ytResultToTrack,
+  type YTHomeSection,
+  type YTSearchResult,
+} from '../../services/youtube';
 import type { Playlist, Track } from '../../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ---------------------------------------------------------------------------
+// MMKV cache for home feed (stale-while-revalidate)
+// ---------------------------------------------------------------------------
+
+const HOME_CACHE_KEY = 'home-feed-cache';
+
+interface HomeFeedCache {
+  trending: YTSearchResult[];
+  sections: YTHomeSection[];
+  cachedAt: number;
+}
+
+let _homeStorage: any = null;
+function getHomeStorage() {
+  if (!_homeStorage) {
+    try {
+      const { createMMKV } = require('react-native-mmkv');
+      _homeStorage = createMMKV({ id: 'home-cache' });
+    } catch {
+      _homeStorage = {
+        set: () => {},
+        getString: () => undefined,
+      };
+    }
+  }
+  return _homeStorage;
+}
+
+function readHomeCache(): HomeFeedCache | null {
+  try {
+    const raw = getHomeStorage().getString(HOME_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as HomeFeedCache;
+  } catch {
+    return null;
+  }
+}
+
+function writeHomeCache(data: HomeFeedCache) {
+  try {
+    getHomeStorage().set(HOME_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // Silently fail
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,67 +98,82 @@ function getGreeting(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quick-Play Card (glassmorphism 2-column grid)
+// Trending Track Card (for YT Music home sections)
 // ---------------------------------------------------------------------------
 
-interface QuickPlayCardProps {
-  playlist: Playlist;
+interface TrendingCardProps {
+  item: YTSearchResult;
   onPress: () => void;
+  onLongPress: () => void;
+  size: number;
 }
 
-const QuickPlayCard: React.FC<QuickPlayCardProps> = React.memo(
-  ({ playlist, onPress }) => (
+const TrendingCard: React.FC<TrendingCardProps> = React.memo(
+  ({ item, onPress, onLongPress, size }) => (
     <TouchableOpacity
-      style={styles.quickCard}
+      style={{ width: size, marginRight: Spacing.md }}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
     >
-      <Image
-        source={playlist.artwork}
-        style={styles.quickCardArt}
-        contentFit="cover"
-        transition={200}
-      />
-      <Text style={styles.quickCardText} numberOfLines={2}>
-        {playlist.name}
+      <View style={styles.recentCardArtContainer}>
+        <Image
+          source={{ uri: item.artwork }}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: BorderRadius.md,
+            backgroundColor: Colors.surfaceLight,
+          }}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
+      <Text
+        style={styles.recentCardTitle}
+        numberOfLines={2}
+        ellipsizeMode="tail"
+      >
+        {item.title}
+      </Text>
+      <Text
+        style={styles.recentCardSubtitle}
+        numberOfLines={1}
+        ellipsizeMode="tail"
+      >
+        {item.artist}
       </Text>
     </TouchableOpacity>
   ),
 );
 
 // ---------------------------------------------------------------------------
-// Featured Card (hero-style horizontal card)
+// Quick-Play Card (glassmorphism 2-column grid)
 // ---------------------------------------------------------------------------
 
-interface FeaturedCardProps {
-  playlist: Playlist;
+interface QuickPlayCardProps {
+  item: YTSearchResult;
   onPress: () => void;
+  onLongPress: () => void;
 }
 
-const FeaturedCard: React.FC<FeaturedCardProps> = React.memo(
-  ({ playlist, onPress }) => (
+const QuickPlayCard: React.FC<QuickPlayCardProps> = React.memo(
+  ({ item, onPress, onLongPress }) => (
     <TouchableOpacity
-      style={styles.featuredCard}
+      style={styles.quickCard}
       onPress={onPress}
-      activeOpacity={0.8}
+      onLongPress={onLongPress}
+      activeOpacity={0.7}
     >
       <Image
-        source={playlist.artwork}
-        style={styles.featuredCardBg}
+        source={{ uri: item.artwork }}
+        style={styles.quickCardArt}
         contentFit="cover"
-        transition={300}
+        transition={200}
       />
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']}
-        style={styles.featuredCardOverlay}
-      >
-        <Text style={styles.featuredCardTitle} numberOfLines={1}>
-          {playlist.name}
-        </Text>
-        <Text style={styles.featuredCardDesc} numberOfLines={1}>
-          {playlist.description}
-        </Text>
-      </LinearGradient>
+      <Text style={styles.quickCardText} numberOfLines={2}>
+        {item.title}
+      </Text>
     </TouchableOpacity>
   ),
 );
@@ -116,19 +185,21 @@ const FeaturedCard: React.FC<FeaturedCardProps> = React.memo(
 interface RecentTrackCardProps {
   track: Track;
   onPress: () => void;
+  onLongPress: () => void;
   size: number;
 }
 
 const RecentTrackCard: React.FC<RecentTrackCardProps> = React.memo(
-  ({ track, onPress, size }) => (
+  ({ track, onPress, onLongPress, size }) => (
     <TouchableOpacity
       style={{ width: size, marginRight: Spacing.md }}
       onPress={onPress}
+      onLongPress={onLongPress}
       activeOpacity={0.7}
     >
       <View style={styles.recentCardArtContainer}>
         <Image
-          source={track.artwork}
+          source={track.isYT ? { uri: track.artwork as string } : track.artwork}
           style={{
             width: size,
             height: size,
@@ -161,86 +232,134 @@ const RecentTrackCard: React.FC<RecentTrackCardProps> = React.memo(
 // Home Screen
 // ---------------------------------------------------------------------------
 
-const QUICK_PLAY_COUNT = 6;
-const POPULAR_COUNT = 5;
-const RECENT_FALLBACK_COUNT = 5;
 const CARD_SIZE = 145;
 
 const HomeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { playTrack } = usePlayer();
+  const { playTrack, playTrackWithRecommendations } = usePlayer();
   const recentlyPlayed = usePlayerStore((s) => s.recentlyPlayed);
 
   const greeting = useMemo(() => getGreeting(), []);
 
-  const quickPlaylists = useMemo(
-    () => DEMO_PLAYLISTS.slice(0, QUICK_PLAY_COUNT),
-    [],
-  );
+  // Context menu state — one shared menu for all cards
+  const [menuTrack, setMenuTrack] = useState<Track | null>(null);
+  const [menuVisible, setMenuVisible] = useState(false);
 
-  const recentData = useMemo(() => {
-    if (recentlyPlayed.length > 0) return recentlyPlayed;
-    return DEMO_TRACKS.slice(0, RECENT_FALLBACK_COUNT);
-  }, [recentlyPlayed]);
+  const openContextMenu = useCallback((track: Track) => {
+    setMenuTrack(track);
+    setMenuVisible(true);
+  }, []);
 
-  const popularTracks = useMemo(
-    () => DEMO_TRACKS.slice(0, POPULAR_COUNT),
-    [],
-  );
+  const closeContextMenu = useCallback(() => {
+    setMenuVisible(false);
+  }, []);
 
-  // Featured playlist (first one)
-  const featuredPlaylist = useMemo(() => DEMO_PLAYLISTS[0], []);
+  // Live YT Music data
+  const [homeSections, setHomeSections] = useState<YTHomeSection[]>([]);
+  const [quickPlayTracks, setQuickPlayTracks] = useState<YTSearchResult[]>([]);
+  const [trendingTracks, setTrendingTracks] = useState<YTSearchResult[]>([]);
+  const [isLoadingHome, setIsLoadingHome] = useState(true);
+
+  // Fetch home feed on mount — stale-while-revalidate via MMKV
+  useEffect(() => {
+    let cancelled = false;
+
+    // 1. Load from cache immediately (no spinner if cache exists)
+    const cached = readHomeCache();
+    if (cached && cached.trending.length > 0) {
+      setTrendingTracks(cached.trending.slice(0, 10));
+      setQuickPlayTracks(cached.trending.slice(0, 6));
+      setHomeSections(cached.sections.slice(0, 4));
+      setIsLoadingHome(false); // Show cached UI instantly
+    }
+
+    // 2. Fetch fresh data in background
+    async function loadHome() {
+      try {
+        const [trending, sections] = await Promise.all([
+          searchYTMusic('trending hits 2025'),
+          getHomeFeed(),
+        ]);
+
+        if (cancelled) return;
+
+        const freshTrending = trending.slice(0, 10);
+        const freshSections = sections.slice(0, 4);
+
+        setTrendingTracks(freshTrending);
+        setQuickPlayTracks(trending.slice(0, 6));
+        setHomeSections(freshSections);
+
+        // Write to cache
+        writeHomeCache({
+          trending,
+          sections: freshSections,
+          cachedAt: Date.now(),
+        });
+      } catch (err) {
+        console.warn('[Home] Failed to load:', err);
+      } finally {
+        if (!cancelled) setIsLoadingHome(false);
+      }
+    }
+
+    loadHome();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleQuickPlay = useCallback(
-    (playlist: Playlist) => {
-      const tracks = getPlaylistTracks(playlist);
-      if (tracks.length > 0) {
-        playTrack(tracks, 0);
-      }
+    (item: YTSearchResult) => {
+      const track = ytResultToTrack(item);
+      playTrackWithRecommendations(track);
     },
-    [playTrack],
+    [playTrackWithRecommendations],
   );
 
-  const handlePlaylistPlay = useCallback(
-    (playlist: Playlist) => {
-      const tracks = getPlaylistTracks(playlist);
-      if (tracks.length > 0) {
-        playTrack(tracks, 0);
-      }
+  const handleTrendingPlay = useCallback(
+    (items: YTSearchResult[], index: number) => {
+      const tracks = items.map(ytResultToTrack);
+      playTrack(tracks, index);
     },
     [playTrack],
   );
 
   const handleRecentTrackPlay = useCallback(
     (track: Track) => {
-      const idx = DEMO_TRACKS.findIndex((t) => t.id === track.id);
-      playTrack(DEMO_TRACKS, idx >= 0 ? idx : 0);
+      const recentList = recentlyPlayed.length > 0 ? recentlyPlayed : [];
+      const idx = recentList.findIndex((t) => t.id === track.id);
+      playTrack(recentList, idx >= 0 ? idx : 0);
     },
-    [playTrack],
+    [playTrack, recentlyPlayed],
   );
 
-  const handlePopularTrackPlay = useCallback(
-    (index: number) => {
-      playTrack(DEMO_TRACKS, index);
+  const handleSectionPlay = useCallback(
+    (section: YTHomeSection, index: number) => {
+      const track = ytResultToTrack(section.items[index]);
+      playTrackWithRecommendations(track);
     },
-    [playTrack],
+    [playTrackWithRecommendations],
   );
 
   const renderQuickGrid = () => {
-    const rows: Playlist[][] = [];
-    for (let i = 0; i < quickPlaylists.length; i += 2) {
-      rows.push(quickPlaylists.slice(i, i + 2));
+    if (quickPlayTracks.length === 0) return null;
+
+    const rows: YTSearchResult[][] = [];
+    for (let i = 0; i < quickPlayTracks.length; i += 2) {
+      rows.push(quickPlayTracks.slice(i, i + 2));
     }
 
     return (
       <View style={styles.quickGrid}>
         {rows.map((row, ri) => (
           <View key={ri} style={styles.quickRow}>
-            {row.map((pl) => (
+            {row.map((item) => (
               <QuickPlayCard
-                key={pl.id}
-                playlist={pl}
-                onPress={() => handleQuickPlay(pl)}
+                key={item.videoId}
+                item={item}
+                onPress={() => handleQuickPlay(item)}
+                onLongPress={() => openContextMenu(ytResultToTrack(item))}
               />
             ))}
           </View>
@@ -305,61 +424,96 @@ const HomeScreen: React.FC = () => {
           </View>
 
           {/* ---- Quick play grid ---- */}
-          {renderQuickGrid()}
+          {isLoadingHome ? (
+            <View style={styles.quickGridLoading}>
+              <ActivityIndicator size="small" color={Colors.textMuted} />
+            </View>
+          ) : (
+            renderQuickGrid()
+          )}
         </LinearGradient>
 
-        {/* ---- Featured Card ---- */}
-        <View style={styles.featuredSection}>
-          <FeaturedCard
-            playlist={featuredPlaylist}
-            onPress={() => handlePlaylistPlay(featuredPlaylist)}
-          />
-        </View>
-
         {/* ---- Recently Played ---- */}
-        <SectionHeader title="Recently played" />
-        <FlatList
-          data={recentData}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalList}
-          renderItem={({ item }) => (
-            <RecentTrackCard
-              track={item}
-              onPress={() => handleRecentTrackPlay(item)}
-              size={CARD_SIZE}
+        {recentlyPlayed.length > 0 && (
+          <>
+            <SectionHeader title="Recently played" />
+            <FlatList
+              data={recentlyPlayed}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              renderItem={({ item }) => (
+                <RecentTrackCard
+                  track={item}
+                  onPress={() => handleRecentTrackPlay(item)}
+                  onLongPress={() => openContextMenu(item)}
+                  size={CARD_SIZE}
+                />
+              )}
             />
-          )}
-        />
+          </>
+        )}
 
-        {/* ---- Made For You ---- */}
-        <SectionHeader title="Made for you" />
-        <FlatList
-          data={DEMO_PLAYLISTS}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalList}
-          renderItem={({ item }) => (
-            <PlaylistCard
-              playlist={item}
-              onPress={() => handlePlaylistPlay(item)}
-              size={CARD_SIZE}
+        {/* ---- Trending ---- */}
+        {trendingTracks.length > 0 && (
+          <>
+            <SectionHeader title="Trending Now" />
+            <FlatList
+              data={trendingTracks}
+              keyExtractor={(item) => item.videoId}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              renderItem={({ item, index }) => (
+                <TrendingCard
+                  item={item}
+                  onPress={() => handleTrendingPlay(trendingTracks, index)}
+                  onLongPress={() => openContextMenu(ytResultToTrack(item))}
+                  size={CARD_SIZE}
+                />
+              )}
             />
-          )}
-        />
+          </>
+        )}
 
-        {/* ---- Popular Tracks ---- */}
-        <SectionHeader title="Popular tracks" />
-        {popularTracks.map((track, index) => (
-          <TrackRow
-            key={track.id}
-            track={track}
-            onPress={() => handlePopularTrackPlay(index)}
-          />
+        {/* ---- YT Music Home Sections ---- */}
+        {homeSections.map((section, sectionIdx) => (
+          <React.Fragment key={`section-${sectionIdx}`}>
+            <SectionHeader title={section.title} />
+            <FlatList
+              data={section.items.slice(0, 10)}
+              keyExtractor={(item) => item.videoId}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              renderItem={({ item, index }) => (
+                <TrendingCard
+                  item={item}
+                  onPress={() => handleSectionPlay(section, index)}
+                  onLongPress={() => openContextMenu(ytResultToTrack(item))}
+                  size={CARD_SIZE}
+                />
+              )}
+            />
+          </React.Fragment>
         ))}
+
+        {/* ---- Loading indicator at bottom while fetching ---- */}
+        {isLoadingHome && (
+          <View style={styles.sectionLoading}>
+            <ActivityIndicator size="small" color={Colors.textMuted} />
+            <Text style={styles.loadingText}>Loading music...</Text>
+          </View>
+        )}
       </ScrollView>
+
+      {/* Shared context menu for all cards */}
+      <TrackContextMenu
+        track={menuTrack}
+        visible={menuVisible}
+        onClose={closeContextMenu}
+      />
     </View>
   );
 };
@@ -411,10 +565,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // ---- Quick-play grid (glassmorphism cards) ----
+  // ---- Quick-play grid ----
   quickGrid: {
     paddingHorizontal: Spacing.lg,
     marginTop: Spacing.md,
+  },
+  quickGridLoading: {
+    height: 190,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   quickRow: {
     flexDirection: 'row',
@@ -445,46 +604,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
   },
 
-  // ---- Featured section ----
-  featuredSection: {
-    paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.sm,
-  },
-  featuredCard: {
-    width: '100%',
-    height: 180,
-    borderRadius: BorderRadius.xl,
-    overflow: 'hidden',
-    ...Shadows.medium,
-  },
-  featuredCardBg: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  featuredCardOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'flex-end',
-    padding: Spacing.xl,
-  },
-  featuredCardTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.heavy,
-    color: Colors.white,
-    letterSpacing: -0.3,
-  },
-  featuredCardDesc: {
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.regular,
-    color: 'rgba(255,255,255,0.75)',
-    marginTop: Spacing.xs,
-  },
-
   // ---- Horizontal lists ----
   horizontalList: {
     paddingHorizontal: Spacing.lg,
   },
 
-  // ---- Recent track card ----
+  // ---- Recent / Trending track card ----
   recentCardArtContainer: {
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
@@ -501,5 +626,16 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.regular,
     color: Colors.textSecondary,
     marginTop: 2,
+  },
+
+  // ---- Loading ----
+  sectionLoading: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl * 2,
+  },
+  loadingText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginTop: Spacing.sm,
   },
 });

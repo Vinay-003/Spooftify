@@ -6,6 +6,7 @@ import {
   State,
 } from 'react-native-track-player';
 import usePlayerStore from '../store/playerStore';
+import { prefetchManager } from '../services/prefetchManager';
 
 type PlaybackStatus = 'playing' | 'paused' | 'loading' | 'idle' | 'stopped';
 
@@ -35,6 +36,7 @@ export function useTrackProgress() {
   const setProgress = usePlayerStore((s) => s.setProgress);
   const setPlaybackState = usePlayerStore((s) => s.setPlaybackState);
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
+  const syncCurrentIndex = usePlayerStore((s) => s.syncCurrentIndex);
   const addToRecentlyPlayed = usePlayerStore((s) => s.addToRecentlyPlayed);
   const queue = usePlayerStore((s) => s.queue);
 
@@ -43,22 +45,55 @@ export function useTrackProgress() {
     setProgress(position, duration, buffered);
   }, [position, duration, buffered, setProgress]);
 
-  // Sync mapped playback state to store
+  // Sync mapped playback state to store.
+  // IMPORTANT: Don't overwrite a manual 'loading' state with 'idle'.
+  // When we set 'loading' (e.g. while resolving a YT stream URL),
+  // TrackPlayer reports State.None after reset() — we must ignore that.
   useEffect(() => {
     const mapped = mapPlaybackState(playbackState);
+    const currentStoreState = usePlayerStore.getState().playbackState;
+
+    if (
+      currentStoreState === 'loading' &&
+      (mapped === 'idle' || mapped === 'stopped')
+    ) {
+      return;
+    }
+
     setPlaybackState(mapped);
   }, [playbackState, setPlaybackState]);
 
-  // Sync active track to store and record recently played
+  // Sync active track to store, update currentIndex, record recently played,
+  // and trigger prefetch. This is the AUTHORITATIVE source for currentIndex —
+  // it syncs Zustand's index from TrackPlayer's actual active track, preventing
+  // desync caused by PlaybackService's remove/add/skip cycles.
+  //
+  // NOTE: Placeholder URL resolution is handled exclusively by the
+  // PlaybackService's PlaybackActiveTrackChanged listener to avoid
+  // double-resolution races.
   useEffect(() => {
     if (activeTrack?.id) {
+      // Sync currentIndex from TrackPlayer's active track
+      syncCurrentIndex(activeTrack.id);
+
       const matchedTrack = queue.find((t) => t.id === activeTrack.id);
       if (matchedTrack) {
         setCurrentTrack(matchedTrack);
         addToRecentlyPlayed(matchedTrack);
+
+        // Trigger prefetch for upcoming tracks
+        if (matchedTrack.isYT) {
+          const videoIds = queue
+            .filter((t) => t.isYT)
+            .map((t) => t.id);
+          const currentYtIdx = videoIds.indexOf(matchedTrack.id);
+          if (currentYtIdx >= 0) {
+            prefetchManager.prefetchAhead(videoIds, currentYtIdx);
+          }
+        }
       }
     }
-  }, [activeTrack?.id, queue, setCurrentTrack, addToRecentlyPlayed]);
+  }, [activeTrack?.id, queue, setCurrentTrack, syncCurrentIndex, addToRecentlyPlayed]);
 
   return {
     position,

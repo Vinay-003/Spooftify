@@ -1,3 +1,6 @@
+// Polyfills MUST load before anything that imports youtubei.js
+import './src/polyfills';
+
 import { registerRootComponent } from 'expo';
 import TrackPlayer from 'react-native-track-player';
 

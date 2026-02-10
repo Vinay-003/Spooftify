@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +50,7 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
   const playbackState = usePlayerStore((s) => s.playbackState);
   const position = usePlayerStore((s) => s.position);
   const duration = usePlayerStore((s) => s.duration);
+  const buffered = usePlayerStore((s) => s.buffered);
   const repeatMode = usePlayerStore((s) => s.repeatMode);
   const isShuffled = usePlayerStore((s) => s.isShuffled);
 
@@ -62,7 +64,9 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
   } = usePlayer();
 
   const isPlaying = playbackState === 'playing';
+  const isBuffering = playbackState === 'loading';
   const progress = duration > 0 ? position / duration : 0;
+  const bufferProgress = duration > 0 ? Math.min(buffered / duration, 1) : 0;
 
   // ── Seek slider state ──
   const SLIDER_WIDTH = SCREEN_WIDTH - Spacing.xxxl * 2;
@@ -183,7 +187,11 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
       <View style={styles.artworkContainer}>
         <View style={styles.artworkGlow} />
         <Image
-          source={currentTrack.artwork}
+          source={
+            typeof currentTrack.artwork === 'string'
+              ? { uri: currentTrack.artwork }
+              : currentTrack.artwork
+          }
           style={styles.artwork}
           contentFit="cover"
           transition={300}
@@ -209,6 +217,13 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
       <GestureDetector gesture={seekGesture}>
         <Animated.View style={styles.progressContainer}>
           <View style={styles.progressBackground}>
+            {/* Buffer fill */}
+            <View
+              style={[
+                styles.bufferFill,
+                { width: `${bufferProgress * 100}%` },
+              ]}
+            />
             <Animated.View style={[styles.progressFillContainer, seekFillStyle]}>
               <LinearGradient
                 colors={['#4F8EF7', Colors.secondary]}
@@ -246,16 +261,20 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={togglePlayPause}
+          onPress={isBuffering ? undefined : togglePlayPause}
           style={styles.playButton}
           activeOpacity={0.8}
         >
-          <Ionicons
-            name={isPlaying ? 'pause' : 'play'}
-            size={30}
-            color={Colors.background}
-            style={!isPlaying ? styles.playIconOffset : undefined}
-          />
+          {isBuffering ? (
+            <ActivityIndicator size={30} color={Colors.background} />
+          ) : (
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={30}
+              color={Colors.background}
+              style={!isPlaying ? styles.playIconOffset : undefined}
+            />
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={skipToNext} hitSlop={8} style={styles.skipButton}>
@@ -400,6 +419,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceHighlight,
     borderRadius: PROGRESS_BAR_HEIGHT / 2,
     overflow: 'visible',
+  },
+  bufferFill: {
+    position: 'absolute',
+    height: PROGRESS_BAR_HEIGHT,
+    borderRadius: PROGRESS_BAR_HEIGHT / 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   progressFillContainer: {
     height: PROGRESS_BAR_HEIGHT,
