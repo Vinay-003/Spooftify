@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -17,6 +18,7 @@ import {
   FontSize,
   FontWeight,
   BorderRadius,
+  Shadows,
 } from '../../theme';
 import {
   DEMO_TRACKS,
@@ -27,6 +29,8 @@ import { SectionHeader, PlaylistCard, TrackRow } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import usePlayerStore from '../../store/playerStore';
 import type { Playlist, Track } from '../../types';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,7 +44,7 @@ function getGreeting(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quick-Play Card (2-column grid item)
+// Quick-Play Card (glassmorphism 2-column grid)
 // ---------------------------------------------------------------------------
 
 interface QuickPlayCardProps {
@@ -69,7 +73,44 @@ const QuickPlayCard: React.FC<QuickPlayCardProps> = React.memo(
 );
 
 // ---------------------------------------------------------------------------
-// Recently-Played Card (uses track data directly)
+// Featured Card (hero-style horizontal card)
+// ---------------------------------------------------------------------------
+
+interface FeaturedCardProps {
+  playlist: Playlist;
+  onPress: () => void;
+}
+
+const FeaturedCard: React.FC<FeaturedCardProps> = React.memo(
+  ({ playlist, onPress }) => (
+    <TouchableOpacity
+      style={styles.featuredCard}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <Image
+        source={playlist.artwork}
+        style={styles.featuredCardBg}
+        contentFit="cover"
+        transition={300}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']}
+        style={styles.featuredCardOverlay}
+      >
+        <Text style={styles.featuredCardTitle} numberOfLines={1}>
+          {playlist.name}
+        </Text>
+        <Text style={styles.featuredCardDesc} numberOfLines={1}>
+          {playlist.description}
+        </Text>
+      </LinearGradient>
+    </TouchableOpacity>
+  ),
+);
+
+// ---------------------------------------------------------------------------
+// Recently-Played Card
 // ---------------------------------------------------------------------------
 
 interface RecentTrackCardProps {
@@ -85,17 +126,19 @@ const RecentTrackCard: React.FC<RecentTrackCardProps> = React.memo(
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Image
-        source={track.artwork}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: BorderRadius.xs,
-          backgroundColor: Colors.surfaceLight,
-        }}
-        contentFit="cover"
-        transition={200}
-      />
+      <View style={styles.recentCardArtContainer}>
+        <Image
+          source={track.artwork}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: BorderRadius.md,
+            backgroundColor: Colors.surfaceLight,
+          }}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
       <Text
         style={styles.recentCardTitle}
         numberOfLines={2}
@@ -121,35 +164,33 @@ const RecentTrackCard: React.FC<RecentTrackCardProps> = React.memo(
 const QUICK_PLAY_COUNT = 6;
 const POPULAR_COUNT = 5;
 const RECENT_FALLBACK_COUNT = 5;
-const CARD_SIZE = 140;
+const CARD_SIZE = 145;
 
 const HomeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { playTrack } = usePlayer();
   const recentlyPlayed = usePlayerStore((s) => s.recentlyPlayed);
 
-  // ---- Greeting ----
   const greeting = useMemo(() => getGreeting(), []);
 
-  // ---- Quick-play playlists (first 6) ----
   const quickPlaylists = useMemo(
     () => DEMO_PLAYLISTS.slice(0, QUICK_PLAY_COUNT),
     [],
   );
 
-  // ---- Recently played section data ----
   const recentData = useMemo(() => {
     if (recentlyPlayed.length > 0) return recentlyPlayed;
     return DEMO_TRACKS.slice(0, RECENT_FALLBACK_COUNT);
   }, [recentlyPlayed]);
 
-  // ---- Popular tracks (first 5) ----
   const popularTracks = useMemo(
     () => DEMO_TRACKS.slice(0, POPULAR_COUNT),
     [],
   );
 
-  // ---- Handlers ----
+  // Featured playlist (first one)
+  const featuredPlaylist = useMemo(() => DEMO_PLAYLISTS[0], []);
+
   const handleQuickPlay = useCallback(
     (playlist: Playlist) => {
       const tracks = getPlaylistTracks(playlist);
@@ -185,7 +226,6 @@ const HomeScreen: React.FC = () => {
     [playTrack],
   );
 
-  // ---- Render helpers ----
   const renderQuickGrid = () => {
     const rows: Playlist[][] = [];
     for (let i = 0; i < quickPlaylists.length; i += 2) {
@@ -213,15 +253,16 @@ const HomeScreen: React.FC = () => {
     <View style={styles.screen}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 130 }}
         showsVerticalScrollIndicator={false}
       >
         {/* ---- Top gradient overlay ---- */}
         <LinearGradient
-          colors={[Colors.gradientStart, Colors.gradientEnd]}
+          colors={[Colors.gradientStart, Colors.gradientMid, Colors.gradientEnd]}
+          locations={[0, 0.6, 1]}
           style={[styles.gradient, { paddingTop: insets.top }]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
+          start={{ x: 0.2, y: 0 }}
+          end={{ x: 0.8, y: 1 }}
         >
           {/* ---- Top bar ---- */}
           <View style={styles.topBar}>
@@ -234,7 +275,7 @@ const HomeScreen: React.FC = () => {
               >
                 <Ionicons
                   name="notifications-outline"
-                  size={24}
+                  size={22}
                   color={Colors.textPrimary}
                 />
               </TouchableOpacity>
@@ -245,7 +286,7 @@ const HomeScreen: React.FC = () => {
               >
                 <Ionicons
                   name="time-outline"
-                  size={24}
+                  size={22}
                   color={Colors.textPrimary}
                 />
               </TouchableOpacity>
@@ -256,7 +297,7 @@ const HomeScreen: React.FC = () => {
               >
                 <Ionicons
                   name="settings-outline"
-                  size={24}
+                  size={22}
                   color={Colors.textPrimary}
                 />
               </TouchableOpacity>
@@ -266,6 +307,14 @@ const HomeScreen: React.FC = () => {
           {/* ---- Quick play grid ---- */}
           {renderQuickGrid()}
         </LinearGradient>
+
+        {/* ---- Featured Card ---- */}
+        <View style={styles.featuredSection}>
+          <FeaturedCard
+            playlist={featuredPlaylist}
+            onPress={() => handlePlaylistPlay(featuredPlaylist)}
+          />
+        </View>
 
         {/* ---- Recently Played ---- */}
         <SectionHeader title="Recently played" />
@@ -332,20 +381,21 @@ const styles = StyleSheet.create({
 
   // ---- Gradient / Top area ----
   gradient: {
-    paddingBottom: Spacing.lg,
+    paddingBottom: Spacing.xl,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
   },
   greeting: {
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xxxl,
+    fontWeight: FontWeight.heavy,
     color: Colors.textPrimary,
+    letterSpacing: -0.5,
   },
   topBarIcons: {
     flexDirection: 'row',
@@ -353,9 +403,15 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     marginLeft: Spacing.lg,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  // ---- Quick-play grid ----
+  // ---- Quick-play grid (glassmorphism cards) ----
   quickGrid: {
     paddingHorizontal: Spacing.lg,
     marginTop: Spacing.md,
@@ -369,15 +425,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    backgroundColor: Colors.surfaceLight,
-    borderRadius: BorderRadius.xs,
+    backgroundColor: Colors.glass,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
     overflow: 'hidden',
     marginHorizontal: 4,
-    height: 56,
+    height: 58,
   },
   quickCardArt: {
-    width: 56,
-    height: 56,
+    width: 58,
+    height: 58,
   },
   quickCardText: {
     flex: 1,
@@ -387,12 +445,50 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
   },
 
+  // ---- Featured section ----
+  featuredSection: {
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.sm,
+  },
+  featuredCard: {
+    width: '100%',
+    height: 180,
+    borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
+    ...Shadows.medium,
+  },
+  featuredCardBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  featuredCardOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    padding: Spacing.xl,
+  },
+  featuredCardTitle: {
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.heavy,
+    color: Colors.white,
+    letterSpacing: -0.3,
+  },
+  featuredCardDesc: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.regular,
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: Spacing.xs,
+  },
+
   // ---- Horizontal lists ----
   horizontalList: {
     paddingHorizontal: Spacing.lg,
   },
 
   // ---- Recent track card ----
+  recentCardArtContainer: {
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+  },
   recentCardTitle: {
     fontSize: 13,
     fontWeight: FontWeight.semibold,

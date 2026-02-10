@@ -16,6 +16,7 @@ import {
   FontSize,
   FontWeight,
   BorderRadius,
+  Shadows,
 } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
 import { usePlayer } from '../../hooks';
@@ -43,12 +44,14 @@ const QueueTrackRow = React.memo(
       activeOpacity={0.6}
       onPress={onPress}
     >
-      <Image
-        source={track.artwork}
-        style={styles.trackArtwork}
-        contentFit="cover"
-        transition={200}
-      />
+      <View style={styles.trackArtworkContainer}>
+        <Image
+          source={track.artwork}
+          style={styles.trackArtwork}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
       <View style={styles.trackInfo}>
         <Text style={styles.trackTitle} numberOfLines={1}>
           {track.title}
@@ -65,7 +68,7 @@ const QueueTrackRow = React.memo(
         <Ionicons
           name="remove-circle-outline"
           size={22}
-          color={Colors.textSecondary}
+          color={Colors.textMuted}
         />
       </TouchableOpacity>
     </TouchableOpacity>
@@ -121,12 +124,14 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
         <Text style={styles.sectionLabel}>NOW PLAYING</Text>
         {currentTrack ? (
           <View style={styles.nowPlayingRow}>
-            <Image
-              source={currentTrack.artwork}
-              style={styles.trackArtwork}
-              contentFit="cover"
-              transition={200}
-            />
+            <View style={styles.trackArtworkContainer}>
+              <Image
+                source={currentTrack.artwork}
+                style={styles.trackArtwork}
+                contentFit="cover"
+                transition={200}
+              />
+            </View>
             <View style={styles.trackInfo}>
               <Text style={styles.nowPlayingTitle} numberOfLines={1}>
                 {currentTrack.title}
@@ -154,11 +159,13 @@ const QueueScreen: React.FC<QueueScreenProps> = ({ onClose }) => {
   const ListEmpty = useCallback(
     () => (
       <View style={styles.emptyContainer}>
-        <Ionicons
-          name="musical-notes-outline"
-          size={48}
-          color={Colors.textMuted}
-        />
+        <View style={styles.emptyIconContainer}>
+          <Ionicons
+            name="musical-notes-outline"
+            size={36}
+            color={Colors.textMuted}
+          />
+        </View>
         <Text style={styles.emptyTitle}>Your queue is empty</Text>
         <Text style={styles.emptySubtitle}>
           Add songs to your queue to see them here
@@ -216,11 +223,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.surfaceLight,
+    borderBottomColor: Colors.glassBorder,
   },
   closeButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.glass,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -230,7 +239,7 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
   headerSpacer: {
-    width: 32,
+    width: 36,
   },
   listContent: {
     paddingHorizontal: Spacing.lg,
@@ -238,9 +247,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     color: Colors.textSecondary,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semibold,
-    letterSpacing: 1,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1.5,
     marginTop: Spacing.xxl,
     marginBottom: Spacing.md,
   },
@@ -250,9 +259,11 @@ const styles = StyleSheet.create({
   nowPlayingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.surfaceLight,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.glass,
     borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
     paddingHorizontal: Spacing.md,
   },
   trackRow: {
@@ -260,10 +271,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.sm,
   },
+  trackArtworkContainer: {
+    borderRadius: BorderRadius.sm,
+    overflow: 'hidden',
+  },
   trackArtwork: {
     width: ARTWORK_SIZE,
     height: ARTWORK_SIZE,
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.sm,
   },
   trackInfo: {
     flex: 1,
@@ -278,7 +293,7 @@ const styles = StyleSheet.create({
   nowPlayingTitle: {
     color: Colors.primary,
     fontSize: FontSize.md,
-    fontWeight: FontWeight.medium,
+    fontWeight: FontWeight.semibold,
   },
   trackArtist: {
     color: Colors.textSecondary,
@@ -293,11 +308,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 80,
   },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
   emptyTitle: {
     color: Colors.textPrimary,
     fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
-    marginTop: Spacing.lg,
   },
   emptySubtitle: {
     color: Colors.textSecondary,

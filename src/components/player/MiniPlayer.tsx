@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, FontSize, FontWeight, Spacing, BorderRadius, Layout } from '../../theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Colors, FontSize, FontWeight, Spacing, BorderRadius, Layout, Shadows } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
 import { usePlayer } from '../../hooks';
 
@@ -11,8 +12,8 @@ interface MiniPlayerProps {
 }
 
 const MINI_PLAYER_HEIGHT = Layout.miniPlayerHeight;
-const ART_SIZE = 40;
-const PROGRESS_HEIGHT = 2;
+const ART_SIZE = 44;
+const PROGRESS_HEIGHT = 3;
 
 const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -22,7 +23,6 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
 
   const { togglePlayPause } = usePlayer();
 
-  // Don't render when there's no track
   if (!currentTrack) return null;
 
   const isPlaying = playbackState === 'playing';
@@ -34,6 +34,9 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
       onPress={onPress}
       style={styles.container}
     >
+      {/* Glass background */}
+      <View style={styles.glassBackground} />
+
       {/* Main content row */}
       <View style={styles.content}>
         {/* Album art */}
@@ -58,8 +61,8 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
         <TouchableOpacity hitSlop={12} style={styles.iconButton}>
           <Ionicons
             name="phone-portrait-outline"
-            size={18}
-            color={Colors.white}
+            size={16}
+            color={Colors.textSecondary}
           />
         </TouchableOpacity>
 
@@ -73,15 +76,18 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
         >
           <Ionicons
             name={isPlaying ? 'pause' : 'play'}
-            size={22}
+            size={20}
             color={Colors.white}
           />
         </TouchableOpacity>
       </View>
 
-      {/* Thin progress bar at bottom edge */}
+      {/* Gradient progress bar at bottom edge */}
       <View style={styles.progressBarContainer}>
-        <View
+        <LinearGradient
+          colors={[Colors.primary, Colors.secondary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
           style={[
             styles.progressBarFill,
             { width: `${progress * 100}%` },
@@ -95,10 +101,17 @@ const MiniPlayer: React.FC<MiniPlayerProps> = ({ onPress }) => {
 const styles = StyleSheet.create({
   container: {
     height: MINI_PLAYER_HEIGHT,
-    backgroundColor: Colors.surfaceLight,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
+    borderRadius: BorderRadius.md,
+    marginHorizontal: Spacing.sm,
     overflow: 'hidden',
+    ...Shadows.small,
+  },
+  glassBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    borderRadius: BorderRadius.md,
   },
   content: {
     flex: 1,
@@ -109,16 +122,16 @@ const styles = StyleSheet.create({
   artwork: {
     width: ART_SIZE,
     height: ART_SIZE,
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.sm,
   },
   trackInfo: {
     flex: 1,
-    marginLeft: Spacing.sm,
+    marginLeft: Spacing.md,
     marginRight: Spacing.sm,
     justifyContent: 'center',
   },
   title: {
-    color: Colors.white,
+    color: Colors.textPrimary,
     fontSize: 13,
     fontWeight: FontWeight.semibold,
     lineHeight: 17,
@@ -134,7 +147,12 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
   },
   playPauseButton: {
-    padding: Spacing.sm,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressBarContainer: {
     height: PROGRESS_HEIGHT,
@@ -143,7 +161,6 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: PROGRESS_HEIGHT,
-    backgroundColor: Colors.primary,
   },
 });
 

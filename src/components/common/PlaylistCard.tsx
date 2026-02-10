@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../../theme';
+import { Colors, Spacing, FontSize, FontWeight, BorderRadius, Shadows } from '../../theme';
 import { Playlist } from '../../types';
 
 interface PlaylistCardProps {
@@ -13,7 +13,7 @@ interface PlaylistCardProps {
 const PlaylistCard: React.FC<PlaylistCardProps> = ({
   playlist,
   onPress,
-  size = 140,
+  size = 145,
 }) => {
   return (
     <TouchableOpacity
@@ -21,15 +21,17 @@ const PlaylistCard: React.FC<PlaylistCardProps> = ({
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Image
-        source={playlist.artwork}
-        style={[
-          styles.artwork,
-          { width: size, height: size },
-        ]}
-        contentFit="cover"
-        transition={200}
-      />
+      <View style={styles.artworkContainer}>
+        <Image
+          source={playlist.artwork}
+          style={[
+            styles.artwork,
+            { width: size, height: size },
+          ]}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
       <Text style={styles.name} numberOfLines={2} ellipsizeMode="tail">
         {playlist.name}
       </Text>
@@ -52,8 +54,13 @@ const styles = StyleSheet.create({
   container: {
     marginRight: Spacing.md,
   },
+  artworkContainer: {
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    ...Shadows.small,
+  },
   artwork: {
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.md,
     backgroundColor: Colors.surfaceLight,
   },
   name: {

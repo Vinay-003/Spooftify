@@ -70,7 +70,7 @@ function TabIcon({
     <Ionicons
       name={name}
       size={size}
-      color={focused ? Colors.white : Colors.textMuted}
+      color={focused ? Colors.textPrimary : Colors.textMuted}
     />
   );
 }
@@ -139,14 +139,12 @@ export default function AppNavigator() {
 
       // Fling detection
       if (velocity > 800) {
-        // Fling down - collapse
         translateY.value = withSpring(SNAP_BOTTOM, SPRING_CONFIG, () => {
           runOnJS(setIsPlayerExpanded)(false);
         });
         return;
       }
       if (velocity < -800) {
-        // Fling up - expand
         translateY.value = withSpring(SNAP_TOP, SPRING_CONFIG);
         return;
       }
@@ -201,12 +199,13 @@ export default function AppNavigator() {
             tabBarStyle: {
               backgroundColor: Colors.surface,
               borderTopWidth: 0,
+              borderTopColor: Colors.glassBorder,
               height: TAB_BAR_HEIGHT,
               paddingBottom: insets.bottom,
               paddingTop: Spacing.xs,
               elevation: 0,
             },
-            tabBarActiveTintColor: Colors.white,
+            tabBarActiveTintColor: Colors.textPrimary,
             tabBarInactiveTintColor: Colors.textMuted,
             tabBarLabelStyle: {
               fontSize: 10,
@@ -352,7 +351,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.textMuted,
+    backgroundColor: Colors.surfaceHighlight,
   },
   modalContainer: {
     flex: 1,

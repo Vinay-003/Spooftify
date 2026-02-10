@@ -23,10 +23,10 @@ interface NowPlayingScreenProps {
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const ARTWORK_SIZE = SCREEN_WIDTH - Spacing.xxl * 2;
+const ARTWORK_SIZE = SCREEN_WIDTH - Spacing.xxxl * 2;
 const PROGRESS_BAR_HEIGHT = 4;
 const PROGRESS_HIT_SLOP = 12;
-const PLAY_BUTTON_SIZE = 64;
+const PLAY_BUTTON_SIZE = 68;
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -65,7 +65,7 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
     (event: GestureResponderEvent) => {
       if (duration <= 0) return;
       const { locationX } = event.nativeEvent;
-      const barWidth = SCREEN_WIDTH - Spacing.xxl * 2;
+      const barWidth = SCREEN_WIDTH - Spacing.xxxl * 2;
       const clamped = Math.max(0, Math.min(locationX, barWidth));
       const seekPosition = (clamped / barWidth) * duration;
       seekTo(seekPosition);
@@ -109,8 +109,8 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
 
   return (
     <LinearGradient
-      colors={[Colors.surfaceLight, Colors.background]}
-      locations={[0, 0.6]}
+      colors={[Colors.gradientStart, Colors.surface, Colors.background]}
+      locations={[0, 0.5, 1]}
       style={[styles.container, { paddingTop: insets.top }]}
     >
       {/* Top Bar */}
@@ -132,6 +132,7 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
 
       {/* Album Artwork */}
       <View style={styles.artworkContainer}>
+        <View style={styles.artworkGlow} />
         <Image
           source={currentTrack.artwork}
           style={styles.artwork}
@@ -150,8 +151,8 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
             {currentTrack.artist}
           </Text>
         </View>
-        <TouchableOpacity hitSlop={12}>
-          <Ionicons name="heart-outline" size={24} color={Colors.white} />
+        <TouchableOpacity hitSlop={12} style={styles.heartButton}>
+          <Ionicons name="heart-outline" size={24} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -162,7 +163,12 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
         hitSlop={{ top: PROGRESS_HIT_SLOP, bottom: PROGRESS_HIT_SLOP }}
       >
         <View style={styles.progressBackground}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+          <LinearGradient
+            colors={[Colors.primary, Colors.secondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.progressFill, { width: `${progress * 100}%` }]}
+          />
           <View
             style={[
               styles.progressThumb,
@@ -185,12 +191,12 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
           <Ionicons
             name="shuffle"
             size={24}
-            color={isShuffled ? Colors.primary : Colors.white}
+            color={isShuffled ? Colors.primary : Colors.textSecondary}
           />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={skipToPrevious} hitSlop={8}>
-          <Ionicons name="play-skip-back" size={32} color={Colors.white} />
+        <TouchableOpacity onPress={skipToPrevious} hitSlop={8} style={styles.skipButton}>
+          <Ionicons name="play-skip-back" size={28} color={Colors.white} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -201,13 +207,13 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
           <Ionicons
             name={isPlaying ? 'pause' : 'play'}
             size={30}
-            color={Colors.black}
+            color={Colors.background}
             style={!isPlaying ? styles.playIconOffset : undefined}
           />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={skipToNext} hitSlop={8}>
-          <Ionicons name="play-skip-forward" size={32} color={Colors.white} />
+        <TouchableOpacity onPress={skipToNext} hitSlop={8} style={styles.skipButton}>
+          <Ionicons name="play-skip-forward" size={28} color={Colors.white} />
         </TouchableOpacity>
 
         <TouchableOpacity onPress={toggleRepeatMode} hitSlop={12}>
@@ -215,7 +221,7 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
             <Ionicons
               name={repeatIconName}
               size={24}
-              color={repeatMode !== 'off' ? Colors.primary : Colors.white}
+              color={repeatMode !== 'off' ? Colors.primary : Colors.textSecondary}
             />
             {repeatMode === 'track' && <View style={styles.repeatDot} />}
           </View>
@@ -224,15 +230,15 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
 
       {/* Bottom Row */}
       <View style={[styles.bottomRow, { paddingBottom: insets.bottom + Spacing.md }]}>
-        <TouchableOpacity hitSlop={12}>
+        <TouchableOpacity hitSlop={12} style={styles.bottomButton}>
           <Ionicons name="phone-portrait-outline" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity hitSlop={12}>
+        <TouchableOpacity hitSlop={12} style={styles.bottomButton}>
           <Ionicons name="share-outline" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={onOpenQueue} hitSlop={12}>
+        <TouchableOpacity onPress={onOpenQueue} hitSlop={12} style={styles.bottomButton}>
           <Ionicons name="list" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>
@@ -243,7 +249,7 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: Spacing.xxl,
+    paddingHorizontal: Spacing.xxxl,
   },
 
   // ── Top Bar ──────────────────────────────────────────
@@ -265,10 +271,10 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.sm,
   },
   topBarLabel: {
-    color: Colors.white,
+    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.bold,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
@@ -276,17 +282,26 @@ const styles = StyleSheet.create({
   artworkContainer: {
     alignItems: 'center',
     marginTop: Spacing.xxl,
-    ...Shadows.large,
+  },
+  artworkGlow: {
+    position: 'absolute',
+    width: ARTWORK_SIZE * 0.85,
+    height: ARTWORK_SIZE * 0.85,
+    borderRadius: ARTWORK_SIZE * 0.425,
+    backgroundColor: Colors.secondary,
+    opacity: 0.08,
+    top: ARTWORK_SIZE * 0.1,
   },
   artwork: {
     width: ARTWORK_SIZE,
     height: ARTWORK_SIZE,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
+    ...Shadows.large,
   },
   placeholderArtwork: {
     width: ARTWORK_SIZE,
     height: ARTWORK_SIZE,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
     backgroundColor: Colors.surfaceElevated,
     alignSelf: 'center',
     alignItems: 'center',
@@ -307,16 +322,25 @@ const styles = StyleSheet.create({
   },
   trackTitle: {
     color: Colors.white,
-    fontSize: 20,
+    fontSize: FontSize.xxl,
     fontWeight: FontWeight.bold,
-    lineHeight: 26,
+    lineHeight: 28,
+    letterSpacing: -0.3,
   },
   trackArtist: {
     color: Colors.textSecondary,
     fontSize: FontSize.lg,
     fontWeight: FontWeight.regular,
-    marginTop: 2,
+    marginTop: 4,
     lineHeight: 22,
+  },
+  heartButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ── Progress ─────────────────────────────────────────
@@ -327,13 +351,12 @@ const styles = StyleSheet.create({
   },
   progressBackground: {
     height: PROGRESS_BAR_HEIGHT,
-    backgroundColor: '#535353',
+    backgroundColor: Colors.surfaceHighlight,
     borderRadius: PROGRESS_BAR_HEIGHT / 2,
     overflow: 'visible',
   },
   progressFill: {
     height: PROGRESS_BAR_HEIGHT,
-    backgroundColor: Colors.white,
     borderRadius: PROGRESS_BAR_HEIGHT / 2,
   },
   progressThumb: {
@@ -344,6 +367,7 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: Colors.white,
+    ...Shadows.small,
   },
 
   // ── Time Labels ──────────────────────────────────────
@@ -353,9 +377,9 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   timeText: {
-    color: Colors.textSecondary,
+    color: Colors.textMuted,
     fontSize: FontSize.xs,
-    fontWeight: FontWeight.regular,
+    fontWeight: FontWeight.medium,
   },
 
   // ── Controls ─────────────────────────────────────────
@@ -363,7 +387,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: Spacing.xl,
+    marginTop: Spacing.xxl,
+  },
+  skipButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   playButton: {
     width: PLAY_BUTTON_SIZE,
@@ -372,9 +403,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Shadows.medium,
   },
   playIconOffset: {
-    marginLeft: 3, // visually center the play triangle
+    marginLeft: 3,
   },
   repeatContainer: {
     alignItems: 'center',
@@ -393,7 +425,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 'auto',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xxl,
+  },
+  bottomButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

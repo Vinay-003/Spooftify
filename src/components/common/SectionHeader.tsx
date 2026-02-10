@@ -32,18 +32,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: Spacing.sm,
+    marginTop: Spacing.xl,
     marginBottom: Spacing.lg,
     paddingHorizontal: Spacing.lg,
   },
   title: {
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.heavy,
     color: Colors.textPrimary,
+    letterSpacing: -0.3,
   },
   actionText: {
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
-    color: Colors.textSecondary,
+    color: Colors.primary,
   },
 });

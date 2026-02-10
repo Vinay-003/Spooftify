@@ -11,7 +11,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../../theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Colors, Spacing, FontSize, FontWeight, BorderRadius, Shadows } from '../../theme';
 import { DEMO_TRACKS, SEARCH_CATEGORIES } from '../../data/tracks';
 import { TrackRow } from '../../components/common';
 import { usePlayer } from '../../hooks';
@@ -19,6 +20,22 @@ import type { Track, Category } from '../../types';
 
 const COLUMN_GAP = Spacing.md;
 const NUM_COLUMNS = 2;
+
+// Color pairs for category gradient tiles
+const CATEGORY_GRADIENTS: Record<string, [string, string]> = {
+  pop: ['#E8115B', '#A50D40'],
+  hiphop: ['#BA5D07', '#8A4305'],
+  rock: ['#E61E32', '#A31525'],
+  indie: ['#608108', '#425905'],
+  electronic: ['#7358FF', '#5240C0'],
+  rnb: ['#DC148C', '#9E0F65'],
+  jazz: ['#477D95', '#2F5566'],
+  classical: ['#8C67AB', '#6A4D82'],
+  ambient: ['#1E3264', '#142248'],
+  lofi: ['#503750', '#3A2839'],
+  chill: ['#2D46B9', '#1E3080'],
+  workout: ['#E13300', '#A32600'],
+};
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
@@ -62,16 +79,33 @@ export default function SearchScreen() {
   );
 
   const renderCategoryItem = useCallback(
-    ({ item }: { item: Category }) => (
-      <View style={styles.categoryWrapper}>
-        <TouchableOpacity
-          style={[styles.categoryTile, { backgroundColor: item.color }]}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.categoryName}>{item.name}</Text>
-        </TouchableOpacity>
-      </View>
-    ),
+    ({ item }: { item: Category }) => {
+      const gradient = CATEGORY_GRADIENTS[item.id] || [item.color, Colors.surfaceLight];
+      return (
+        <View style={styles.categoryWrapper}>
+          <TouchableOpacity
+            style={styles.categoryTile}
+            activeOpacity={0.7}
+          >
+            <LinearGradient
+              colors={gradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.categoryGradient}
+            >
+              <Text style={styles.categoryName}>{item.name}</Text>
+              <View style={styles.categoryIconBg}>
+                <Ionicons
+                  name="musical-notes"
+                  size={20}
+                  color="rgba(255,255,255,0.3)"
+                />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      );
+    },
     [],
   );
 
@@ -81,11 +115,13 @@ export default function SearchScreen() {
   const ListEmptyResults = useMemo(
     () => (
       <View style={styles.emptyContainer}>
-        <Ionicons
-          name="search-outline"
-          size={48}
-          color={Colors.textMuted}
-        />
+        <View style={styles.emptyIconContainer}>
+          <Ionicons
+            name="search-outline"
+            size={40}
+            color={Colors.textMuted}
+          />
+        </View>
         <Text style={styles.emptyTitle}>No results found</Text>
         <Text style={styles.emptySubtitle}>
           Try searching for something else
@@ -114,8 +150,8 @@ export default function SearchScreen() {
         <View style={styles.searchBar}>
           <Ionicons
             name="search"
-            size={20}
-            color={Colors.background}
+            size={18}
+            color={Colors.textMuted}
             style={styles.searchIcon}
           />
           <TextInput
@@ -134,7 +170,7 @@ export default function SearchScreen() {
               style={styles.clearButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -173,17 +209,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
   },
   headerTitle: {
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xxxl,
+    fontWeight: FontWeight.heavy,
     color: Colors.textPrimary,
+    letterSpacing: -0.5,
   },
 
-  // Search bar
+  // Search bar — glass style
   searchBarContainer: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
@@ -191,9 +228,11 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.surfaceLight,
     borderRadius: BorderRadius.md,
-    height: 40,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    height: 44,
     paddingHorizontal: Spacing.md,
   },
   searchIcon: {
@@ -203,7 +242,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FontSize.md,
     fontWeight: FontWeight.medium,
-    color: Colors.background,
+    color: Colors.textPrimary,
     height: '100%',
     padding: 0,
   },
@@ -211,17 +250,18 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
   },
 
-  // Categories
+  // Categories — gradient tiles
   categoriesContainer: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.huge,
   },
   browseTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.heavy,
     color: Colors.textPrimary,
     marginBottom: Spacing.lg,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
+    letterSpacing: -0.3,
   },
   categoryRow: {
     justifyContent: 'space-between',
@@ -231,16 +271,28 @@ const styles = StyleSheet.create({
     width: `${(100 - (COLUMN_GAP / 3.75)) / NUM_COLUMNS}%` as any,
   },
   categoryTile: {
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    ...Shadows.small,
+  },
+  categoryGradient: {
     aspectRatio: 1.65,
     padding: Spacing.md,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
   },
   categoryName: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
     color: Colors.white,
+  },
+  categoryIconBg: {
+    alignSelf: 'flex-end',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Empty state
@@ -253,11 +305,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 120,
   },
+  emptyIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
   emptyTitle: {
     fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
     color: Colors.textPrimary,
-    marginTop: Spacing.lg,
   },
   emptySubtitle: {
     fontSize: FontSize.md,

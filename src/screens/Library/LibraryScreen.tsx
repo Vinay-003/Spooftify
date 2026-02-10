@@ -51,12 +51,14 @@ const PlaylistRow = React.memo<PlaylistRowProps>(({ playlist, onPress }) => {
       activeOpacity={0.6}
       onPress={() => onPress(playlist)}
     >
-      <Image
-        source={playlist.artwork}
-        style={styles.rowArtwork}
-        contentFit="cover"
-        transition={200}
-      />
+      <View style={styles.rowArtworkContainer}>
+        <Image
+          source={playlist.artwork}
+          style={styles.rowArtwork}
+          contentFit="cover"
+          transition={200}
+        />
+      </View>
       <View style={styles.rowTextContainer}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {playlist.name}
@@ -80,12 +82,14 @@ const TrackRow = React.memo<TrackRowProps>(({ track, onPress }) => (
     activeOpacity={0.6}
     onPress={() => onPress(track)}
   >
-    <Image
-      source={track.artwork}
-      style={styles.rowArtwork}
-      contentFit="cover"
-      transition={200}
-    />
+    <View style={styles.rowArtworkContainer}>
+      <Image
+        source={track.artwork}
+        style={styles.rowArtwork}
+        contentFit="cover"
+        transition={200}
+      />
+    </View>
     <View style={styles.rowTextContainer}>
       <Text style={styles.rowTitle} numberOfLines={1}>
         {track.title}
@@ -119,7 +123,6 @@ function LibraryScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterChip | null>(null);
   const [sortOption, setSortOption] = useState<SortOption>('Recents');
 
-  // Cycle sort options on press
   const cycleSortOption = useCallback(() => {
     setSortOption((prev) => {
       if (prev === 'Recents') return 'Alphabetical';
@@ -128,7 +131,6 @@ function LibraryScreen() {
     });
   }, []);
 
-  // Sort playlists based on current sort option
   const sortedPlaylists = useMemo(() => {
     const list = [...DEMO_PLAYLISTS];
     switch (sortOption) {
@@ -140,11 +142,10 @@ function LibraryScreen() {
         );
       case 'Recents':
       default:
-        return list; // original order acts as recency
+        return list;
     }
   }, [sortOption]);
 
-  // Handle pressing a playlist row
   const handlePlaylistPress = useCallback(
     (playlist: Playlist) => {
       const tracks = getPlaylistTracks(playlist);
@@ -155,7 +156,6 @@ function LibraryScreen() {
     [playTrack],
   );
 
-  // Handle pressing a recently-played track row
   const handleTrackPress = useCallback(
     (track: Track) => {
       const idx = DEMO_TRACKS.findIndex((t) => t.id === track.id);
@@ -164,14 +164,9 @@ function LibraryScreen() {
     [playTrack],
   );
 
-  // Toggle a filter chip (tapping the active one deselects it)
   const handleFilterPress = useCallback((chip: FilterChip) => {
     setActiveFilter((prev) => (prev === chip ? null : chip));
   }, []);
-
-  // -----------------------------------------------------------------------
-  // Build the list data depending on the active filter
-  // -----------------------------------------------------------------------
 
   type ListItem =
     | { type: 'playlist'; data: Playlist }
@@ -188,7 +183,6 @@ function LibraryScreen() {
     }
 
     if (activeFilter === 'Artists') {
-      // Dedupe artists from demo tracks and show as simple rows
       const seen = new Set<string>();
       const items: ListItem[] = [];
       for (const t of DEMO_TRACKS) {
@@ -200,7 +194,6 @@ function LibraryScreen() {
       return items;
     }
 
-    // No filter – show playlists then recently played
     const items: ListItem[] = [];
     items.push({ type: 'section' as const, title: 'Playlists' });
     for (const p of sortedPlaylists) {
@@ -245,10 +238,6 @@ function LibraryScreen() {
     [handlePlaylistPress, handleTrackPress],
   );
 
-  // -----------------------------------------------------------------------
-  // Render
-  // -----------------------------------------------------------------------
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
@@ -258,14 +247,14 @@ function LibraryScreen() {
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons
               name="search-outline"
-              size={24}
+              size={22}
               color={Colors.textPrimary}
             />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons
               name="add"
-              size={28}
+              size={26}
               color={Colors.textPrimary}
             />
           </TouchableOpacity>
@@ -305,7 +294,7 @@ function LibraryScreen() {
         <Ionicons
           name="swap-vertical-outline"
           size={16}
-          color={Colors.textPrimary}
+          color={Colors.textSecondary}
         />
         <Text style={styles.sortText}>{sortOption}</Text>
       </TouchableOpacity>
@@ -319,6 +308,13 @@ function LibraryScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconContainer}>
+              <Ionicons
+                name="library-outline"
+                size={36}
+                color={Colors.textMuted}
+              />
+            </View>
             <Text style={styles.emptyText}>
               {activeFilter === 'Recently Played'
                 ? 'No recently played tracks yet.'
@@ -346,21 +342,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
   },
   headerTitle: {
     color: Colors.textPrimary,
-    fontSize: FontSize.xxl,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xxxl,
+    fontWeight: FontWeight.heavy,
+    letterSpacing: -0.5,
   },
   headerIcons: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   headerIconBtn: {
-    padding: Spacing.sm,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginLeft: Spacing.sm,
   },
 
@@ -374,13 +376,16 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   chip: {
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: Colors.glass,
     borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
   },
   chipActive: {
-    backgroundColor: Colors.textPrimary,
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   chipText: {
     color: Colors.textPrimary,
@@ -388,40 +393,45 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
   },
   chipTextActive: {
-    color: Colors.black,
+    color: Colors.white,
+    fontWeight: FontWeight.bold,
   },
 
   // Sort bar
   sortBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
     gap: Spacing.xs,
   },
   sortText: {
-    color: Colors.textPrimary,
+    color: Colors.textSecondary,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.medium,
   },
 
   // List
   listContent: {
-    paddingBottom: 120, // space for tab bar + mini player
+    paddingBottom: 130,
   },
 
-  // Rows (shared between playlist & track)
+  // Rows
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
     height: 72,
   },
+  rowArtworkContainer: {
+    borderRadius: BorderRadius.sm,
+    overflow: 'hidden',
+  },
   rowArtwork: {
     width: 56,
     height: 56,
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.sm,
     backgroundColor: Colors.surfaceLight,
   },
   rowTextContainer: {
@@ -442,20 +452,30 @@ const styles = StyleSheet.create({
 
   // Section headers
   sectionHeader: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.xl,
     paddingBottom: Spacing.sm,
   },
   sectionHeaderText: {
     color: Colors.textPrimary,
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.heavy,
+    letterSpacing: -0.3,
   },
 
   // Empty state
   emptyContainer: {
     paddingTop: Spacing.huge,
     alignItems: 'center',
+  },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
   },
   emptyText: {
     color: Colors.textMuted,

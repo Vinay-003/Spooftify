@@ -6,13 +6,11 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Spacing, FontSize, FontWeight } from '../../theme';
+import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
 import type { LyricLine } from '../../types';
 
@@ -29,7 +27,7 @@ interface LyricsSheetProps {
 
 /**
  * Given sorted lyrics and a playback position, return the index of the
- * currently active lyric line (the last line whose time ≤ position).
+ * currently active lyric line (the last line whose time <= position).
  */
 function getActiveLyricIndex(
   lyrics: LyricLine[],
@@ -84,7 +82,6 @@ const LyricsSheet: React.FC<LyricsSheetProps> = ({ onClose }) => {
   };
 
   const handleScrollEnd = () => {
-    // Re-enable auto-scroll after 4s of inactivity
     scrollTimeout.current = setTimeout(() => {
       isUserScrolling.current = false;
     }, 4000);
@@ -99,7 +96,7 @@ const LyricsSheet: React.FC<LyricsSheetProps> = ({ onClose }) => {
 
   return (
     <LinearGradient
-      colors={['#1A6B4A', '#0D3B28', '#121212']}
+      colors={['#2A1A4E', '#1A1040', Colors.background]}
       locations={[0, 0.45, 1]}
       style={[
         styles.container,
@@ -142,9 +139,9 @@ const LyricsSheet: React.FC<LyricsSheetProps> = ({ onClose }) => {
             if (index === activeIndex) {
               opacity = 1;
             } else if (index < activeIndex) {
-              opacity = 0.4;
+              opacity = 0.35;
             } else {
-              opacity = 0.5;
+              opacity = 0.45;
             }
 
             return (
@@ -166,11 +163,13 @@ const LyricsSheet: React.FC<LyricsSheetProps> = ({ onClose }) => {
         </ScrollView>
       ) : (
         <View style={styles.emptyContainer}>
-          <Ionicons
-            name="musical-notes-outline"
-            size={48}
-            color="rgba(255,255,255,0.4)"
-          />
+          <View style={styles.emptyIconContainer}>
+            <Ionicons
+              name="musical-notes-outline"
+              size={40}
+              color="rgba(255,255,255,0.3)"
+            />
+          </View>
           <Text style={styles.emptyText}>No lyrics available</Text>
         </View>
       )}
@@ -190,7 +189,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   headerSpacer: {
-    width: 32,
+    width: 36,
   },
   headerTitle: {
     color: Colors.textPrimary,
@@ -198,8 +197,10 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
   },
   closeButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.glass,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -217,6 +218,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   lyricLineActive: {
+    color: Colors.primaryLight,
     transform: [{ scale: 1 }],
   },
   emptyContainer: {
@@ -224,11 +226,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emptyIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
   emptyText: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: FontSize.xl,
     fontWeight: FontWeight.semibold,
-    marginTop: Spacing.lg,
   },
 });
 

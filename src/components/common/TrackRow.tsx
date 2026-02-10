@@ -54,12 +54,14 @@ const TrackRow: React.FC<TrackRowProps> = ({
           </Text>
         </View>
       ) : showArtwork ? (
-        <Image
-          source={track.artwork}
-          style={styles.artwork}
-          contentFit="cover"
-          transition={200}
-        />
+        <View style={styles.artworkContainer}>
+          <Image
+            source={track.artwork}
+            style={styles.artwork}
+            contentFit="cover"
+            transition={200}
+          />
+        </View>
       ) : null}
 
       <View style={styles.info}>
@@ -81,8 +83,8 @@ const TrackRow: React.FC<TrackRowProps> = ({
       >
         <Ionicons
           name="ellipsis-horizontal"
-          size={20}
-          color={Colors.textSecondary}
+          size={18}
+          color={Colors.textMuted}
         />
       </TouchableOpacity>
     </TouchableOpacity>
@@ -95,7 +97,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 56,
+    height: 60,
     paddingHorizontal: Spacing.lg,
   },
   indexContainer: {
@@ -108,10 +110,14 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.regular,
     color: Colors.textSecondary,
   },
+  artworkContainer: {
+    borderRadius: BorderRadius.sm,
+    overflow: 'hidden',
+  },
   artwork: {
     width: 48,
     height: 48,
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.sm,
     backgroundColor: Colors.surfaceLight,
   },
   info: {
@@ -121,7 +127,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FontSize.md,
-    fontWeight: FontWeight.regular,
+    fontWeight: FontWeight.medium,
     color: Colors.textPrimary,
     marginBottom: 2,
   },
