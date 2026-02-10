@@ -53,6 +53,11 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
   const buffered = usePlayerStore((s) => s.buffered);
   const repeatMode = usePlayerStore((s) => s.repeatMode);
   const isShuffled = usePlayerStore((s) => s.isShuffled);
+  const toggleLike = usePlayerStore((s) => s.toggleLike);
+  const likedSongs = usePlayerStore((s) => s.likedSongs);
+  const isCurrentLiked = currentTrack
+    ? likedSongs.some((t) => t.id === currentTrack.id)
+    : false;
 
   const {
     togglePlayPause,
@@ -208,8 +213,16 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
             {currentTrack.artist}
           </Text>
         </View>
-        <TouchableOpacity hitSlop={12} style={styles.heartButton}>
-          <Ionicons name="heart-outline" size={24} color={Colors.textSecondary} />
+        <TouchableOpacity
+          hitSlop={12}
+          style={styles.heartButton}
+          onPress={() => currentTrack && toggleLike(currentTrack)}
+        >
+          <Ionicons
+            name={isCurrentLiked ? 'heart' : 'heart-outline'}
+            size={24}
+            color={isCurrentLiked ? Colors.primary : Colors.textSecondary}
+          />
         </TouchableOpacity>
       </View>
 

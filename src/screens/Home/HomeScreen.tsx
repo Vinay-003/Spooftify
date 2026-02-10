@@ -19,14 +19,8 @@ import {
   FontSize,
   FontWeight,
   BorderRadius,
-  Shadows,
 } from '../../theme';
-import {
-  DEMO_TRACKS,
-  DEMO_PLAYLISTS,
-  getPlaylistTracks,
-} from '../../data/tracks';
-import { SectionHeader, PlaylistCard, TrackRow, TrackContextMenu } from '../../components/common';
+import { SectionHeader, TrackContextMenu } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import usePlayerStore from '../../store/playerStore';
 import {
@@ -36,7 +30,8 @@ import {
   type YTHomeSection,
   type YTSearchResult,
 } from '../../services/youtube';
-import type { Playlist, Track } from '../../types';
+import type { Track } from '../../types';
+import { useNavigation } from '@react-navigation/native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -236,6 +231,7 @@ const CARD_SIZE = 145;
 
 const HomeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const { playTrack, playTrackWithRecommendations } = usePlayer();
   const recentlyPlayed = usePlayerStore((s) => s.recentlyPlayed);
 
@@ -433,12 +429,20 @@ const HomeScreen: React.FC = () => {
           )}
         </LinearGradient>
 
-        {/* ---- Recently Played ---- */}
+        {/* ---- Recently Played (max 8, "Show more" → Library tab) ---- */}
         {recentlyPlayed.length > 0 && (
           <>
-            <SectionHeader title="Recently played" />
+            <SectionHeader
+              title="Recently played"
+              actionText={recentlyPlayed.length > 8 ? 'Show more' : undefined}
+              onAction={
+                recentlyPlayed.length > 8
+                  ? () => navigation.navigate('Your Library' as never)
+                  : undefined
+              }
+            />
             <FlatList
-              data={recentlyPlayed}
+              data={recentlyPlayed.slice(0, 8)}
               keyExtractor={(item) => item.id}
               horizontal
               showsHorizontalScrollIndicator={false}

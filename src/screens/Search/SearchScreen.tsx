@@ -13,11 +13,32 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius, Shadows } from '../../theme';
-import { SEARCH_CATEGORIES } from '../../data/tracks';
 import { TrackRow } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import { searchYTMusic, getSearchSuggestions, ytResultToTrack } from '../../services/youtube';
-import type { Track, Category } from '../../types';
+import type { Track } from '../../types';
+
+// Category type for browse tiles (local, no longer in shared types)
+interface Category {
+  id: string;
+  name: string;
+  color: string;
+}
+
+const SEARCH_CATEGORIES: Category[] = [
+  { id: 'pop', name: 'Pop', color: '#E8115B' },
+  { id: 'hiphop', name: 'Hip-Hop', color: '#BA5D07' },
+  { id: 'rock', name: 'Rock', color: '#E61E32' },
+  { id: 'indie', name: 'Indie', color: '#608108' },
+  { id: 'electronic', name: 'Electronic', color: '#7358FF' },
+  { id: 'rnb', name: 'R&B', color: '#DC148C' },
+  { id: 'jazz', name: 'Jazz', color: '#477D95' },
+  { id: 'classical', name: 'Classical', color: '#8C67AB' },
+  { id: 'ambient', name: 'Ambient', color: '#1E3264' },
+  { id: 'lofi', name: 'Lo-Fi', color: '#503750' },
+  { id: 'chill', name: 'Chill', color: '#2D46B9' },
+  { id: 'workout', name: 'Workout', color: '#E13300' },
+];
 
 const COLUMN_GAP = Spacing.md;
 const NUM_COLUMNS = 2;

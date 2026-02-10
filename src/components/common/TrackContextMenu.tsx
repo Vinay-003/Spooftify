@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, FontSize, FontWeight, BorderRadius } from '../../theme';
 import { usePlayer } from '../../hooks';
+import usePlayerStore from '../../store/playerStore';
 import type { Track } from '../../types';
 
 interface TrackContextMenuProps {
@@ -27,6 +28,14 @@ const TrackContextMenu: React.FC<TrackContextMenuProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { playNext, addToQueue } = usePlayer();
+  const toggleLike = usePlayerStore((s) => s.toggleLike);
+  const likedSongs = usePlayerStore((s) => s.likedSongs);
+  const isLiked = track ? likedSongs.some((t) => t.id === track.id) : false;
+
+  const handleToggleLike = useCallback(() => {
+    if (!track) return;
+    toggleLike(track);
+  }, [track, toggleLike]);
 
   const handlePlayNext = useCallback(async () => {
     if (!track) return;
@@ -80,6 +89,23 @@ const TrackContextMenu: React.FC<TrackContextMenuProps> = ({
           <View style={styles.divider} />
 
           {/* Menu options */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            activeOpacity={0.6}
+            onPress={handleToggleLike}
+          >
+            <View style={styles.menuIconContainer}>
+              <Ionicons
+                name={isLiked ? 'heart' : 'heart-outline'}
+                size={22}
+                color={isLiked ? Colors.primary : Colors.textPrimary}
+              />
+            </View>
+            <Text style={styles.menuItemText}>
+              {isLiked ? 'Remove from Liked Songs' : 'Like Song'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.menuItem}
             activeOpacity={0.6}

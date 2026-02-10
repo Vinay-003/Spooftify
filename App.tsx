@@ -10,12 +10,14 @@ import { Colors } from './src/theme';
 export default function App() {
   const [isReady, setIsReady] = useState(false);
   const loadRecentlyPlayed = usePlayerStore((s) => s.loadRecentlyPlayed);
+  const loadLikedSongs = usePlayerStore((s) => s.loadLikedSongs);
 
   useEffect(() => {
     async function init() {
       try {
         await setupPlayer();
         loadRecentlyPlayed();
+        loadLikedSongs();
       } catch (error) {
         console.warn('Failed to setup player:', error);
       } finally {
@@ -23,7 +25,7 @@ export default function App() {
       }
     }
     init();
-  }, [loadRecentlyPlayed]);
+  }, [loadRecentlyPlayed, loadLikedSongs]);
 
   if (!isReady) {
     return (

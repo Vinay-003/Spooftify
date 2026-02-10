@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { Track, RepeatMode } from '../types';
 
 const RECENTLY_PLAYED_KEY = 'recentlyPlayed';
-const MAX_RECENTLY_PLAYED = 20;
+const LIKED_SONGS_KEY = 'likedSongs';
+const MAX_RECENTLY_PLAYED = 30;
 
 // Lazy-init MMKV so it doesn't crash when native module isn't loaded yet
 let _storage: any = null;
@@ -46,6 +47,7 @@ interface PlayerState {
   repeatMode: RepeatMode;
   isShuffled: boolean;
   recentlyPlayed: Track[];
+  likedSongs: Track[];
   isPlayerReady: boolean;
 
   // Actions
@@ -65,6 +67,9 @@ interface PlayerState {
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   addToRecentlyPlayed: (track: Track) => void;
   loadRecentlyPlayed: () => void;
+  toggleLike: (track: Track) => void;
+  isLiked: (trackId: string) => boolean;
+  loadLikedSongs: () => void;
   clearQueue: () => void;
 }
 
@@ -82,6 +87,7 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
   repeatMode: 'off',
   isShuffled: false,
   recentlyPlayed: [],
+  likedSongs: [],
   isPlayerReady: false,
 
   setCurrentTrack: (track: Track) => {
@@ -405,6 +411,40 @@ const usePlayerStore = create<PlayerState>()((set, get) => ({
       }
     } catch {
       // Silently fail on parse/storage errors
+    }
+  },
+
+  toggleLike: (track: Track) => {
+    set((state) => {
+      const isAlreadyLiked = state.likedSongs.some((t) => t.id === track.id);
+      let updated: Track[];
+      if (isAlreadyLiked) {
+        updated = state.likedSongs.filter((t) => t.id !== track.id);
+      } else {
+        updated = [track, ...state.likedSongs];
+      }
+      try {
+        getStorage().set(LIKED_SONGS_KEY, JSON.stringify(updated));
+      } catch {
+        // Silently fail
+      }
+      return { likedSongs: updated };
+    });
+  },
+
+  isLiked: (trackId: string) => {
+    return get().likedSongs.some((t) => t.id === trackId);
+  },
+
+  loadLikedSongs: () => {
+    try {
+      const raw = getStorage().getString(LIKED_SONGS_KEY);
+      if (raw) {
+        const parsed: Track[] = JSON.parse(raw);
+        set({ likedSongs: parsed });
+      }
+    } catch {
+      // Silently fail
     }
   },
 
