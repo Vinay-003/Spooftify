@@ -28,6 +28,7 @@ import QueueScreen from '../screens/Queue/QueueScreen';
 import LyricsSheet from '../screens/NowPlaying/LyricsSheet';
 import MiniPlayer from '../components/player/MiniPlayer';
 import usePlayerStore from '../store/playerStore';
+import { useTrackProgress } from '../hooks';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -77,6 +78,9 @@ function TabIcon({
 export default function AppNavigator() {
   const insets = useSafeAreaInsets();
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+
+  // Keep TrackPlayer state synced to store globally
+  useTrackProgress();
 
   // Player sheet state
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);

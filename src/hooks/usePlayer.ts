@@ -78,13 +78,18 @@ export function usePlayer() {
   }, [storeToggleRepeatMode]);
 
   const toggleShuffle = useCallback(async () => {
+    // Save current position before rebuilding queue
+    const progress = await TrackPlayer.getProgress();
+    const savedPosition = progress.position;
+
     storeToggleShuffle();
     // Rebuild the TrackPlayer queue to match the new store queue
     const state = usePlayerStore.getState();
     const newQueue = state.queue;
     const newIndex = state.currentIndex;
-    await TrackPlayer.reset();
-    await TrackPlayer.add(
+
+    // Use setQueue + skip instead of reset to avoid playback flicker
+    await TrackPlayer.setQueue(
       newQueue.map((t) => ({
         id: t.id,
         url: t.url,
@@ -97,6 +102,7 @@ export function usePlayer() {
     );
     if (newIndex >= 0) {
       await TrackPlayer.skip(newIndex);
+      await TrackPlayer.seekTo(savedPosition);
       await TrackPlayer.play();
     }
   }, [storeToggleShuffle]);

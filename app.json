@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -16,7 +16,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.spooftify.app",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -25,18 +27,19 @@
         "backgroundColor": "#121212"
       },
       "package": "com.spooftify.app",
-      "permissions": ["FOREGROUND_SERVICE", "WAKE_LOCK"]
+      "permissions": [
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "WAKE_LOCK"
+      ]
     },
     "plugins": [
-      "expo-font",
-      [
-        "react-native-track-player",
-        {
-          "android": {
-            "stopForegroundServiceOnLockScreenRemoval": false
-          }
-        }
-      ]
-    ]
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bdec7f84-942a-44eb-9b1f-ea24b958d655"
+      }
+    }
   }
 }

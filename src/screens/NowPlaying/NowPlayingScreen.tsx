@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, FontSize, FontWeight, Spacing, BorderRadius, Shadows } from '../../theme';
 import usePlayerStore from '../../store/playerStore';
-import { usePlayer, useTrackProgress } from '../../hooks';
+import { usePlayer } from '../../hooks';
 
 interface NowPlayingScreenProps {
   onClose: () => void;
@@ -57,9 +57,6 @@ const NowPlayingScreen: React.FC<NowPlayingScreenProps> = ({
     toggleShuffle,
     seekTo,
   } = usePlayer();
-
-  // Also call useTrackProgress to keep the store in sync
-  useTrackProgress();
 
   const isPlaying = playbackState === 'playing';
   const progress = duration > 0 ? position / duration : 0;
