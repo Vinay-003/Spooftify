@@ -8,10 +8,12 @@
  *   4. Get search suggestions
  *   5. Get "Up Next" queue for auto-play / recommendations
  *
- * Everything runs client-side – no backend required.
+ * If EXPO_PUBLIC_RESOLVER_URL is configured, stream resolution is attempted
+ * through the backend resolver first, then falls back to local resolution.
  */
 
 import Innertube, { Platform } from 'youtubei.js';
+import { Platform as RNPlatform } from 'react-native';
 import type { Track } from '../types';
 
 type InnerTubeClient = 'IOS' | 'WEB' | 'MWEB' | 'ANDROID' | 'YTMUSIC' | 'YTMUSIC_ANDROID' | 'YTSTUDIO_ANDROID' | 'TV' | 'TV_SIMPLY' | 'TV_EMBEDDED' | 'YTKIDS' | 'WEB_EMBEDDED' | 'WEB_CREATOR';
@@ -126,6 +128,8 @@ export interface YTSearchResult {
   album: string;
   duration: number; // seconds
   artwork: string; // thumbnail URL
+  browseId?: string;
+  entityType?: 'song' | 'album' | 'playlist' | 'video';
 }
 
 export interface AudioStreamInfo {
@@ -139,12 +143,181 @@ export interface AudioStreamInfo {
   clientUsed?: string; // which client produced this URL (for retry exclusion)
 }
 
+const BACKEND_RESOLVER_URL = (process.env.EXPO_PUBLIC_RESOLVER_URL ?? '').trim();
+
 export interface YTHomeSection {
   title: string;
   items: YTSearchResult[];
 }
 
+export interface YTCollectionDetails {
+  id: string;
+  entityType: 'album' | 'playlist';
+  title: string;
+  artist: string;
+  subtitle: string;
+  artwork: string;
+  tracks: YTSearchResult[];
+}
+
 // ── Search ───────────────────────────────────────────────────────────────────
+const YT_VIDEO_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+
+export function isLikelyVideoId(value: string): boolean {
+  return YT_VIDEO_ID_REGEX.test(value);
+}
+
+export function isPlayableResult(item: YTSearchResult): boolean {
+  return isLikelyVideoId(item.videoId);
+}
+
+function toPlainText(value: any): string {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  if (typeof value?.toString === 'function') {
+    const text = value.toString();
+    if (typeof text === 'string') {
+      const trimmed = text.trim();
+      if (trimmed && trimmed !== '[object Object]') return trimmed;
+    }
+  }
+  return '';
+}
+
+function parseDurationSeconds(value: any): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+
+  if (typeof value?.seconds === 'number' && Number.isFinite(value.seconds)) {
+    return Math.max(0, Math.floor(value.seconds));
+  }
+
+  const text = toPlainText(value?.text ?? value);
+  if (!text) return 0;
+
+  // Supports mm:ss and hh:mm:ss
+  const match = text.match(/^(\d{1,2}:)?\d{1,2}:\d{2}$/);
+  if (!match) return 0;
+
+  const parts = text.split(':').map((p) => parseInt(p, 10));
+  if (parts.some((p) => Number.isNaN(p))) return 0;
+
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
+
+function extractVideoId(item: any): string {
+  const candidates = [
+    toPlainText(item?.id) ||
+    '',
+    toPlainText(item?.video_id),
+    toPlainText(item?.videoId),
+    toPlainText(item?.endpoint?.payload?.videoId),
+    toPlainText(item?.navigation_endpoint?.payload?.videoId),
+    toPlainText(item?.endpoint?.metadata?.videoId),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && isLikelyVideoId(candidate)) {
+      return candidate;
+    }
+  }
+  return '';
+}
+
+function extractBrowseId(item: any): string {
+  const candidates = [
+    toPlainText(item?.endpoint?.payload?.browseId),
+    toPlainText(item?.navigation_endpoint?.payload?.browseId),
+    toPlainText(item?.id),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && !isLikelyVideoId(candidate)) {
+      return candidate;
+    }
+  }
+  return '';
+}
+
+function getPageType(item: any): string {
+  return toPlainText(
+    item?.endpoint?.payload?.browseEndpointContextSupportedConfigs
+      ?.browseEndpointContextMusicConfig?.pageType,
+  );
+}
+
+function asThumbnailList(input: any): any[] {
+  if (Array.isArray(input)) return input;
+  if (Array.isArray(input?.contents)) return input.contents;
+  if (Array.isArray(input?.thumbnails)) return input.thumbnails;
+  return [];
+}
+
+function normalizeSearchItem(item: any): YTSearchResult | null {
+  const videoId = extractVideoId(item);
+  if (!videoId) return null;
+
+  const title = toPlainText(item?.title) || 'Unknown';
+  const artists = Array.isArray(item?.artists)
+    ? item.artists
+      .map((a: any) => toPlainText(a?.name ?? a))
+      .filter(Boolean)
+      .join(', ')
+    : '';
+  const artist =
+    artists ||
+    toPlainText(item?.author) ||
+    toPlainText(item?.subtitle) ||
+    'Unknown Artist';
+  const album = toPlainText(item?.album?.name ?? item?.album);
+  const duration = parseDurationSeconds(item?.duration);
+  const thumbnails = item?.thumbnails ?? item?.thumbnail ?? [];
+  const artwork = bestThumbnail(thumbnails);
+
+  return {
+    videoId,
+    title,
+    artist,
+    album,
+    duration,
+    artwork,
+    entityType: 'song',
+  };
+}
+
+function extractSearchResults(results: any): YTSearchResult[] {
+  const output: YTSearchResult[] = [];
+  const seenIds = new Set<string>();
+
+  // Walk only `contents` chains to avoid traversing huge/cyclic parser objects.
+  const queue: any[] = Array.isArray(results?.contents) ? [...results.contents] : [];
+  const visited = new Set<any>();
+
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (!node || typeof node !== 'object') continue;
+    if (visited.has(node)) continue;
+    visited.add(node);
+
+    const childContents = (node as any).contents;
+    if (Array.isArray(childContents) && childContents.length > 0) {
+      queue.push(...childContents);
+    }
+
+    const normalized = normalizeSearchItem(node);
+    if (!normalized) continue;
+    if (seenIds.has(normalized.videoId)) continue;
+
+    seenIds.add(normalized.videoId);
+    output.push(normalized);
+  }
+
+  return output;
+}
 
 /**
  * Search YouTube Music for songs.
@@ -154,37 +327,27 @@ export async function searchYTMusic(query: string): Promise<YTSearchResult[]> {
   if (!query.trim()) return [];
 
   const yt = await getInnertube();
-  const results = await yt.music.search(query, { type: 'song' });
+  const songResults = await yt.music.search(query, { type: 'song' });
+  const songs = extractSearchResults(songResults);
+  if (songs.length >= 12) return songs;
 
-  const songs: YTSearchResult[] = [];
+  // Fallback: include "video" filter results so songs that exist on YouTube
+  // but not in the strict "song" shelf still appear in app search.
+  try {
+    const videoResults = await yt.music.search(query, { type: 'video' as any });
+    const fromVideos = extractSearchResults(videoResults);
 
-  // When filtered by type, the first content block is the matching shelf
-  const shelf = results.contents?.[0];
-  if (!shelf) return songs;
-
-  const items = (shelf as any).contents ?? [];
-
-  for (const item of items) {
-    const videoId = item.id;
-    if (!videoId) continue;
-
-    // Pick the best quality thumbnail
-    const thumbnails = item.thumbnails ?? [];
-    const thumb = bestThumbnail(thumbnails);
-
-    songs.push({
-      videoId,
-      title: item.title ?? 'Unknown',
-      artist:
-        item.artists?.map((a: any) => a.name).join(', ') ??
-        item.author ?? 'Unknown Artist',
-      album: item.album?.name ?? '',
-      duration: item.duration?.seconds ?? 0,
-      artwork: thumb,
-    });
+    const merged = new Map<string, YTSearchResult>();
+    for (const item of songs) merged.set(item.videoId, item);
+    for (const item of fromVideos) {
+      if (!merged.has(item.videoId)) {
+        merged.set(item.videoId, item);
+      }
+    }
+    return Array.from(merged.values());
+  } catch {
+    return songs;
   }
-
-  return songs;
 }
 
 // ── Search Suggestions ───────────────────────────────────────────────────────
@@ -220,26 +383,55 @@ const clientUserAgents: Record<string, string> = {
   ANDROID: 'com.google.android.youtube/19.35.36(Linux; U; Android 13; en_US; SM-S908E Build/TP1A.220624.014) gzip',
   YTMUSIC_ANDROID: 'com.google.android.apps.youtube.music/5.34.51(Linux; U; Android 13; en_US; SM-S908E Build/TP1A.220624.014) gzip',
   WEB: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  MWEB: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
   YTMUSIC: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  WEB_EMBEDDED: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)',
+  WEB_CREATOR: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)',
+  TV: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+  TV_SIMPLY: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
   TV_EMBEDDED: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
 };
 
 /**
- * Full ordered list of clients to try. IOS stays first because its HLS
- * manifests work reliably with ExoPlayer. ANDROID/YTMUSIC_ANDROID direct
- * format URLs may require PoToken which we don't have. Within each client,
- * tryClientForStream still prefers direct audio over HLS when both exist.
+ * Base client list. Runtime order is adjusted in `getClientOrder()`.
  */
 const ALL_CLIENTS = [
   'IOS',
   'ANDROID',
-  'YTMUSIC_ANDROID',
   'WEB',
+  'MWEB',
   'YTMUSIC',
+  'WEB_EMBEDDED',
+  'WEB_CREATOR',
+  'TV',
+  'TV_SIMPLY',
+  'YTMUSIC_ANDROID',
   'TV_EMBEDDED',
 ] as const;
 
 type ClientName = (typeof ALL_CLIENTS)[number];
+
+function getClientOrder(): ClientName[] {
+  // On Android, prioritize iOS first because its HLS manifests are generally
+  // the most stable for this app, then fall back to direct-capable clients.
+  if (RNPlatform.OS === 'android') {
+    return [
+      'IOS',
+      'ANDROID',
+      'YTMUSIC',
+      'WEB',
+      'MWEB',
+      'WEB_EMBEDDED',
+      'WEB_CREATOR',
+      'TV',
+      'TV_SIMPLY',
+      'YTMUSIC_ANDROID',
+      'TV_EMBEDDED',
+    ];
+  }
+
+  return [...ALL_CLIENTS];
+}
 
 /**
  * Audio quality rank for secondary sorting (higher = better).
@@ -272,7 +464,7 @@ async function tryClientForStream(
 
   if (!streamingData) return null;
 
-  // For IOS, prefer HLS first (known to work), then try direct as fallback
+  // For IOS, prefer HLS first (known to work), then try direct as fallback.
   const preferHLS = client === 'IOS';
 
   if (preferHLS) {
@@ -281,11 +473,15 @@ async function tryClientForStream(
     if (hlsResult) return hlsResult;
 
     // ── Direct fallback for IOS ────────────────────────────────────────
-    const directResult = await tryDirectAudio(yt, streamingData, client);
+    const directResult = await tryDirectAudio(yt, streamingData, client, {
+      allowWithoutPreflight: RNPlatform.OS === 'android',
+    });
     if (directResult) return directResult;
   } else {
     // ── Direct first for non-IOS clients ───────────────────────────────
-    const directResult = await tryDirectAudio(yt, streamingData, client);
+    const directResult = await tryDirectAudio(yt, streamingData, client, {
+      allowWithoutPreflight: RNPlatform.OS === 'android',
+    });
     if (directResult) return directResult;
 
     // ── HLS fallback for non-IOS clients ───────────────────────────────
@@ -294,6 +490,84 @@ async function tryClientForStream(
   }
 
   return null;
+}
+
+function normalizeStreamHeaders(
+  headers: unknown,
+): Record<string, string> | undefined {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (value == null) continue;
+    const normalizedKey = key.toLowerCase() === 'user-agent' ? 'User-Agent' : key;
+    normalized[normalizedKey] = String(value);
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeStreamInfoFromBackend(payload: any): AudioStreamInfo {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Resolver returned invalid payload');
+  }
+
+  const url = toPlainText(payload.url);
+  if (!url) {
+    throw new Error('Resolver returned empty stream URL');
+  }
+
+  return {
+    url,
+    mimeType: toPlainText(payload.mimeType) || 'application/octet-stream',
+    bitrate: Number(payload.bitrate ?? 0) || 0,
+    durationMs: Number(payload.durationMs ?? 0) || 0,
+    expiresAt: Number(payload.expiresAt ?? Date.now() + 5 * 60 * 60 * 1000),
+    headers: normalizeStreamHeaders(payload.headers),
+    isHLS: Boolean(payload.isHLS),
+    clientUsed: toPlainText(payload.clientUsed) || 'BACKEND',
+  };
+}
+
+async function resolveStreamViaBackend(
+  videoId: string,
+  excludeClients?: string[],
+): Promise<AudioStreamInfo> {
+  if (!BACKEND_RESOLVER_URL) {
+    throw new Error('Backend resolver URL is not configured');
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), 18000);
+
+  try {
+    const response = await fetch(BACKEND_RESOLVER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        videoId,
+        excludeClients: excludeClients ?? [],
+      }),
+      signal: controller.signal,
+    });
+
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch {
+      // no-op, handled below
+    }
+
+    if (!response.ok || payload?.ok === false) {
+      const reason = toPlainText(payload?.error) || `HTTP ${response.status}`;
+      throw new Error(reason);
+    }
+
+    const streamPayload = payload?.stream ?? payload;
+    return normalizeStreamInfoFromBackend(streamPayload);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 /**
@@ -478,6 +752,9 @@ async function tryDirectAudio(
   yt: Innertube,
   streamingData: any,
   client: string,
+  options?: {
+    allowWithoutPreflight?: boolean;
+  },
 ): Promise<AudioStreamInfo | null> {
   const audioFormats = (streamingData.adaptive_formats ?? []).filter(
     (f: any) => f.has_audio && !f.has_video,
@@ -498,60 +775,121 @@ async function tryDirectAudio(
     const qualB = AUDIO_QUALITY_RANK[b.audio_quality ?? ''] ?? 0;
     return qualB - qualA;
   });
-  const best = audioFormats[0];
+  const ua = clientUserAgents[client] || clientUserAgents.WEB;
+  const allowWithoutPreflight = !!options?.allowWithoutPreflight;
+  let fallbackWithoutPreflight: AudioStreamInfo | null = null;
+  let preflightAttempts = 0;
 
-  try {
-    const url = await best.decipher(yt.session.player);
-    if (url) {
-      const ua = clientUserAgents[client] || clientUserAgents.WEB;
+  const preflight = async (url: string, format: any): Promise<boolean> => {
+    const timeoutMs = allowWithoutPreflight ? 2500 : 6000;
 
-      // ── Pre-flight: HEAD request to check if URL is actually accessible ──
-      // This prevents returning URLs that will silently fail in ExoPlayer
-      // (e.g. 403 from missing PoToken). Timeout after 5 seconds.
+    const run = async (
+      method: 'HEAD' | 'GET',
+      extraHeaders?: Record<string, string>,
+    ) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
-        const headResp = await fetch(url, {
-          method: 'HEAD',
-          headers: { 'User-Agent': ua },
+        return await fetch(url, {
+          method,
+          headers: {
+            'User-Agent': ua,
+            ...(extraHeaders ?? {}),
+          },
           signal: controller.signal,
         });
+      } finally {
         clearTimeout(timer);
-
-        if (!headResp.ok) {
-          console.warn(
-            `[YT] ${client}: Direct audio pre-flight FAILED — HTTP ${headResp.status} (itag ${best.itag}, ${Math.round((best.bitrate ?? 0) / 1000)}kbps). Likely needs PoToken.`,
-          );
-          return null; // Skip this URL, try next client/fallback
-        }
-        console.log(
-          `[YT] ${client}: Direct audio pre-flight OK — HTTP ${headResp.status}, itag ${best.itag}, ${best.mime_type}, ${Math.round((best.bitrate ?? 0) / 1000)}kbps`,
-        );
-      } catch (pfErr: any) {
-        console.warn(
-          `[YT] ${client}: Direct audio pre-flight error:`,
-          pfErr?.message ?? pfErr,
-        );
-        return null; // Network error or timeout — skip this URL
       }
+    };
+
+    try {
+      const headResp = await run('HEAD');
+      if (headResp.ok) {
+        return true;
+      }
+
+      // Some Googlevideo URLs reject HEAD while GET with Range works.
+      if ([400, 403, 405].includes(headResp.status)) {
+        const getResp = await run('GET', { Range: 'bytes=0-1' });
+        if (getResp.ok || getResp.status === 206) {
+          return true;
+        }
+      }
+
+      console.warn(
+        `[YT] ${client}: Direct audio pre-flight failed (itag ${format.itag}, status ${headResp.status})`,
+      );
+      return false;
+    } catch (pfErr: any) {
+      console.warn(
+        `[YT] ${client}: Direct audio pre-flight error for itag ${format.itag}:`,
+        pfErr?.message ?? pfErr,
+      );
+      return false;
+    }
+  };
+
+  for (const format of audioFormats) {
+    if (allowWithoutPreflight && preflightAttempts >= 1 && fallbackWithoutPreflight) {
+      break;
+    }
+
+    try {
+      const url = await format.decipher(yt.session.player);
+      if (!url) continue;
+
+      preflightAttempts += 1;
+      const isPlayable = await preflight(url, format);
+      if (!isPlayable) {
+        if (!allowWithoutPreflight || fallbackWithoutPreflight) {
+          continue;
+        }
+
+        // React Native fetch preflight can report 403 for URLs that still
+        // play in ExoPlayer. Keep one best candidate as a last resort.
+        fallbackWithoutPreflight = {
+          url,
+          mimeType: format.mime_type,
+          bitrate: format.bitrate,
+          durationMs: format.approx_duration_ms,
+          expiresAt: Date.now() + 5 * 60 * 60 * 1000,
+          headers: {
+            'User-Agent': ua,
+          },
+          clientUsed: client,
+        };
+        break;
+      }
+
+      console.log(
+        `[YT] ${client}: Selected direct audio itag ${format.itag}, ${Math.round((format.bitrate ?? 0) / 1000)}kbps`,
+      );
 
       return {
         url,
-        mimeType: best.mime_type,
-        bitrate: best.bitrate,
-        durationMs: best.approx_duration_ms,
+        mimeType: format.mime_type,
+        bitrate: format.bitrate,
+        durationMs: format.approx_duration_ms,
         expiresAt: Date.now() + 5 * 60 * 60 * 1000,
         headers: {
           'User-Agent': ua,
         },
         clientUsed: client,
       };
+    } catch (err: any) {
+      console.warn(
+        `[YT] ${client}: Decipher failed for itag ${format.itag}:`,
+        err?.message ?? err,
+      );
     }
-  } catch (err: any) {
+  }
+
+  if (fallbackWithoutPreflight) {
     console.warn(
-      `[YT] ${client}: Decipher failed for direct audio:`,
-      err?.message ?? err,
+      `[YT] ${client}: Using direct audio without pre-flight verification`,
     );
+    return fallbackWithoutPreflight;
   }
 
   return null;
@@ -573,10 +911,30 @@ export async function resolveStreamUrl(
   videoId: string,
   excludeClients?: string[],
 ): Promise<AudioStreamInfo> {
+  if (!isLikelyVideoId(videoId)) {
+    throw new Error(`Invalid YouTube video id: ${videoId}`);
+  }
+
+  if (BACKEND_RESOLVER_URL) {
+    try {
+      const backendStream = await resolveStreamViaBackend(videoId, excludeClients);
+      console.log(
+        `[YT] Backend resolver selected ${backendStream.clientUsed ?? 'unknown'} for ${videoId}`,
+      );
+      return backendStream;
+    } catch (err: any) {
+      console.warn(
+        `[YT] Backend resolver failed for ${videoId}, falling back to local resolver:`,
+        err?.message ?? err,
+      );
+    }
+  }
+
   const yt = await getInnertube();
   const excluded = new Set(excludeClients?.map((c) => c.toUpperCase()) ?? []);
+  const clientOrder = getClientOrder();
 
-  for (const client of ALL_CLIENTS) {
+  for (const client of clientOrder) {
     if (excluded.has(client)) continue;
     try {
       const result = await tryClientForStream(yt, videoId, client);
@@ -597,6 +955,10 @@ export async function resolveStreamUrl(
  * The `url` is left empty — it gets resolved lazily by the prefetch manager.
  */
 export function ytResultToTrack(result: YTSearchResult): Track {
+  if (!isPlayableResult(result)) {
+    throw new Error(`Result is not playable: ${result.videoId}`);
+  }
+
   return {
     id: result.videoId,
     title: result.title,
@@ -624,8 +986,9 @@ export async function getUpNext(videoId: string): Promise<YTSearchResult[]> {
 
     for (const item of upNext.contents) {
       if (item.type === 'PlaylistPanelVideo') {
-        const vid = (item as any).video_id;
+        const vid = toPlainText((item as any).video_id);
         if (!vid || vid === videoId) continue; // skip the current track
+        if (!isLikelyVideoId(vid)) continue;
 
         const thumbnails = (item as any).thumbnail ?? [];
         const thumb = bestThumbnail(thumbnails);
@@ -638,6 +1001,7 @@ export async function getUpNext(videoId: string): Promise<YTSearchResult[]> {
             (item as any).album?.name ?? '',
           duration: (item as any).duration?.seconds ?? 0,
           artwork: thumb,
+          entityType: 'song',
         });
       }
     }
@@ -670,36 +1034,68 @@ export async function getHomeFeed(): Promise<YTHomeSection[]> {
 
       for (const item of (section as any).contents ?? []) {
         if (item.type === 'MusicTwoRowItem') {
-          // These can be albums, playlists, or songs
-          const id = item.id;
-          if (!id) continue;
+          // These can be songs, albums, or playlists.
+          const playableVideoId = extractVideoId(item);
+          const browseId = extractBrowseId(item);
+          const pageType = getPageType(item);
+          const isPlayable = !!playableVideoId;
 
-          const thumbnails = (item as any).thumbnail ?? [];
+          if (!isPlayable && !browseId) continue;
+
+          let entityType: YTSearchResult['entityType'] = 'song';
+          if (!isPlayable) {
+            if (pageType.includes('ALBUM')) {
+              entityType = 'album';
+            } else if (pageType.includes('PLAYLIST')) {
+              entityType = 'playlist';
+            } else {
+              entityType = 'playlist';
+            }
+          }
+
+          const thumbnails = asThumbnailList((item as any).thumbnail);
           const thumb = bestThumbnail(thumbnails);
 
           items.push({
-            videoId: id,
+            videoId: playableVideoId || browseId,
             title: (item as any).title?.toString?.() ?? '',
             artist: (item as any).subtitle?.toString?.() ?? '',
             album: '',
-            duration: 0,
+            duration: isPlayable ? ((item as any).duration?.seconds ?? 0) : 0,
             artwork: thumb,
+            browseId: browseId || undefined,
+            entityType,
           });
         } else if (item.type === 'MusicResponsiveListItem') {
-          const id = item.id;
-          if (!id) continue;
+          const playableVideoId = extractVideoId(item);
+          const browseId = extractBrowseId(item);
+          const itemType = toPlainText((item as any).item_type).toLowerCase();
+          const isPlayable = !!playableVideoId;
+          if (!isPlayable && !browseId) continue;
 
-          const thumbnails = (item as any).thumbnails ?? [];
+          const thumbnails = asThumbnailList((item as any).thumbnails);
           const thumb = bestThumbnail(thumbnails);
 
+          let entityType: YTSearchResult['entityType'] = 'song';
+          if (!isPlayable) {
+            entityType =
+              itemType === 'album'
+                ? 'album'
+                : itemType === 'playlist'
+                  ? 'playlist'
+                  : 'playlist';
+          }
+
           items.push({
-            videoId: id,
+            videoId: playableVideoId || browseId,
             title: (item as any).title ?? '',
             artist:
               (item as any).artists?.map((a: any) => a.name).join(', ') ?? '',
             album: (item as any).album?.name ?? '',
-            duration: (item as any).duration?.seconds ?? 0,
+            duration: isPlayable ? ((item as any).duration?.seconds ?? 0) : 0,
             artwork: thumb,
+            browseId: browseId || undefined,
+            entityType,
           });
         }
       }
@@ -714,4 +1110,55 @@ export async function getHomeFeed(): Promise<YTHomeSection[]> {
     console.warn('[YT] Failed to fetch home feed:', e);
     return [];
   }
+}
+
+export async function getCollectionDetails(
+  id: string,
+  entityType: 'album' | 'playlist',
+): Promise<YTCollectionDetails> {
+  const yt = await getInnertube();
+  const collection = entityType === 'album'
+    ? await yt.music.getAlbum(id)
+    : await yt.music.getPlaylist(id);
+
+  const header = (collection as any).header ?? {};
+  const title = toPlainText(header?.title) || 'Unknown';
+  const artist = toPlainText(header?.strapline_text_one) || toPlainText(header?.subtitle);
+  const subtitle = toPlainText(header?.second_subtitle) || toPlainText(header?.subtitle);
+  const artwork = bestThumbnail(asThumbnailList(header?.thumbnail));
+
+  const tracks: YTSearchResult[] = [];
+  const contents = (collection as any).contents ?? (collection as any).items ?? [];
+
+  for (const item of contents) {
+    const videoId = extractVideoId(item);
+    if (!videoId) continue;
+
+    const thumbnails = asThumbnailList((item as any).thumbnails);
+    const trackArtwork = bestThumbnail(thumbnails) || artwork;
+
+    tracks.push({
+      videoId,
+      title: toPlainText((item as any).title) || 'Unknown',
+      artist:
+        (item as any).artists?.map((a: any) => a.name).join(', ') ||
+        toPlainText((item as any).author) ||
+        artist ||
+        'Unknown Artist',
+      album: title,
+      duration: parseDurationSeconds((item as any).duration),
+      artwork: trackArtwork,
+      entityType: 'song',
+    });
+  }
+
+  return {
+    id,
+    entityType,
+    title,
+    artist,
+    subtitle,
+    artwork,
+    tracks,
+  };
 }

@@ -101,18 +101,21 @@ class PrefetchManager {
    *
    * Returns a new AudioStreamInfo if successful, throws if all options exhausted.
    */
-  async reResolve(videoId: string): Promise<AudioStreamInfo> {
-    // Record which client produced the bad URL
+  async reResolve(videoId: string, failedClient?: string): Promise<AudioStreamInfo> {
+    // Record which client produced the bad URL.
+    // Prefer explicit failedClient from PlaybackError metadata; fall back to cache.
     const cached = this.cache.get(videoId);
-    if (cached?.streamInfo.clientUsed) {
+    const clientToMark =
+      failedClient?.trim() || cached?.streamInfo.clientUsed?.trim() || '';
+    if (clientToMark) {
       let failed = this.failedClients.get(videoId);
       if (!failed) {
         failed = new Set();
         this.failedClients.set(videoId, failed);
       }
-      failed.add(cached.streamInfo.clientUsed.toUpperCase());
+      failed.add(clientToMark.toUpperCase());
       console.log(
-        `[Prefetch] Marked client ${cached.streamInfo.clientUsed} as failed for ${videoId}. Failed clients: ${Array.from(failed).join(', ')}`,
+        `[Prefetch] Marked client ${clientToMark} as failed for ${videoId}. Failed clients: ${Array.from(failed).join(', ')}`,
       );
     }
 
@@ -151,13 +154,18 @@ class PrefetchManager {
         streamInfo,
         resolvedAt: Date.now(),
       });
+      // Successful re-resolve resets consecutive failure counter.
+      this.retryCount.delete(videoId);
       return streamInfo;
     } catch (err) {
-      // All clients exhausted
-      this.blacklist.add(videoId);
-      console.warn(
-        `[Prefetch] Video ${videoId} blacklisted — no working client found`,
-      );
+      // Blacklist only after repeated consecutive failures.
+      const latestCount = this.retryCount.get(videoId) ?? count;
+      if (latestCount >= MAX_RETRIES_PER_VIDEO) {
+        this.blacklist.add(videoId);
+        console.warn(
+          `[Prefetch] Video ${videoId} blacklisted — no working client found`,
+        );
+      }
       throw err;
     } finally {
       this.pendingResolves.delete(videoId);

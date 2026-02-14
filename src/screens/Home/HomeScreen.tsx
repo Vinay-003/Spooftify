@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useState, useEffect } from 'react';
+import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   FlatList,
   Dimensions,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -24,16 +25,20 @@ import { SectionHeader, TrackContextMenu } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import usePlayerStore from '../../store/playerStore';
 import {
+  getCollectionDetails,
   getHomeFeed,
+  isPlayableResult,
+  isLikelyVideoId,
   searchYTMusic,
   ytResultToTrack,
+  type YTCollectionDetails,
   type YTHomeSection,
   type YTSearchResult,
 } from '../../services/youtube';
 import type { Track } from '../../types';
 import { useNavigation } from '@react-navigation/native';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ---------------------------------------------------------------------------
 // MMKV cache for home feed (stale-while-revalidate)
@@ -90,6 +95,23 @@ function getGreeting(): string {
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
+}
+
+function sanitizeTracks(tracks: YTSearchResult[]): YTSearchResult[] {
+  return tracks.filter((t) => {
+    if (isLikelyVideoId(t.videoId)) return true;
+    if (!t.browseId) return false;
+    return t.entityType === 'album' || t.entityType === 'playlist';
+  });
+}
+
+function sanitizeSections(sections: YTHomeSection[]): YTHomeSection[] {
+  return sections
+    .map((section) => ({
+      ...section,
+      items: sanitizeTracks(section.items),
+    }))
+    .filter((section) => section.items.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +277,11 @@ const HomeScreen: React.FC = () => {
   const [quickPlayTracks, setQuickPlayTracks] = useState<YTSearchResult[]>([]);
   const [trendingTracks, setTrendingTracks] = useState<YTSearchResult[]>([]);
   const [isLoadingHome, setIsLoadingHome] = useState(true);
+  const [collectionVisible, setCollectionVisible] = useState(false);
+  const [collectionLoading, setCollectionLoading] = useState(false);
+  const [collectionError, setCollectionError] = useState('');
+  const [activeCollection, setActiveCollection] = useState<YTCollectionDetails | null>(null);
+  const collectionRequestRef = useRef(0);
 
   // Fetch home feed on mount — stale-while-revalidate via MMKV
   useEffect(() => {
@@ -263,10 +290,14 @@ const HomeScreen: React.FC = () => {
     // 1. Load from cache immediately (no spinner if cache exists)
     const cached = readHomeCache();
     if (cached && cached.trending.length > 0) {
-      setTrendingTracks(cached.trending.slice(0, 10));
-      setQuickPlayTracks(cached.trending.slice(0, 6));
-      setHomeSections(cached.sections.slice(0, 4));
-      setIsLoadingHome(false); // Show cached UI instantly
+      const cachedTrending = sanitizeTracks(cached.trending);
+      const cachedSections = sanitizeSections(cached.sections);
+      if (cachedTrending.length > 0 || cachedSections.length > 0) {
+        setTrendingTracks(cachedTrending.slice(0, 10));
+        setQuickPlayTracks(cachedTrending.slice(0, 6));
+        setHomeSections(cachedSections.slice(0, 4));
+        setIsLoadingHome(false); // Show cached UI instantly
+      }
     }
 
     // 2. Fetch fresh data in background
@@ -279,16 +310,19 @@ const HomeScreen: React.FC = () => {
 
         if (cancelled) return;
 
-        const freshTrending = trending.slice(0, 10);
-        const freshSections = sections.slice(0, 4);
+        const safeTrending = sanitizeTracks(trending);
+        const safeSections = sanitizeSections(sections);
+
+        const freshTrending = safeTrending.slice(0, 10);
+        const freshSections = safeSections.slice(0, 4);
 
         setTrendingTracks(freshTrending);
-        setQuickPlayTracks(trending.slice(0, 6));
+        setQuickPlayTracks(safeTrending.slice(0, 6));
         setHomeSections(freshSections);
 
         // Write to cache
         writeHomeCache({
-          trending,
+          trending: safeTrending,
           sections: freshSections,
           cachedAt: Date.now(),
         });
@@ -305,18 +339,64 @@ const HomeScreen: React.FC = () => {
     };
   }, []);
 
+  const openCollection = useCallback((item: YTSearchResult) => {
+    const id = item.browseId || item.videoId;
+    if (!id) return;
+
+    const requestId = ++collectionRequestRef.current;
+    setCollectionVisible(true);
+    setCollectionLoading(true);
+    setCollectionError('');
+    setActiveCollection(null);
+
+    getCollectionDetails(id, item.entityType === 'playlist' ? 'playlist' : 'album')
+      .then((details) => {
+        if (requestId !== collectionRequestRef.current) return;
+        setActiveCollection(details);
+        if (details.tracks.length === 0) {
+          setCollectionError('No playable songs were found in this collection.');
+        }
+      })
+      .catch(() => {
+        if (requestId !== collectionRequestRef.current) return;
+        setCollectionError('Failed to load this collection.');
+      })
+      .finally(() => {
+        if (requestId !== collectionRequestRef.current) return;
+        setCollectionLoading(false);
+      });
+  }, []);
+
+  const openTrackContextMenu = useCallback(
+    (item: YTSearchResult) => {
+      if (!isPlayableResult(item)) return;
+      openContextMenu(ytResultToTrack(item));
+    },
+    [openContextMenu],
+  );
+
   const handleQuickPlay = useCallback(
     (item: YTSearchResult) => {
+      if (!isPlayableResult(item)) {
+        openCollection(item);
+        return;
+      }
       const track = ytResultToTrack(item);
       playTrackWithRecommendations(track);
     },
-    [playTrackWithRecommendations],
+    [openCollection, playTrackWithRecommendations],
   );
 
   const handleTrendingPlay = useCallback(
     (items: YTSearchResult[], index: number) => {
-      const tracks = items.map(ytResultToTrack);
-      playTrack(tracks, index);
+      const playable = items
+        .map((item, idx) => ({ item, idx }))
+        .filter((entry) => isPlayableResult(entry.item));
+      if (playable.length === 0) return;
+
+      const tracks = playable.map((entry) => ytResultToTrack(entry.item));
+      const mappedIndex = playable.findIndex((entry) => entry.idx === index);
+      playTrack(tracks, mappedIndex >= 0 ? mappedIndex : 0);
     },
     [playTrack],
   );
@@ -331,11 +411,32 @@ const HomeScreen: React.FC = () => {
   );
 
   const handleSectionPlay = useCallback(
-    (section: YTHomeSection, index: number) => {
-      const track = ytResultToTrack(section.items[index]);
+    (item: YTSearchResult) => {
+      if (!isPlayableResult(item)) {
+        openCollection(item);
+        return;
+      }
+
+      const track = ytResultToTrack(item);
       playTrackWithRecommendations(track);
     },
-    [playTrackWithRecommendations],
+    [openCollection, playTrackWithRecommendations],
+  );
+
+  const closeCollectionModal = useCallback(() => {
+    collectionRequestRef.current += 1;
+    setCollectionVisible(false);
+    setCollectionLoading(false);
+  }, []);
+
+  const playCollectionFromIndex = useCallback(
+    (startIndex: number) => {
+      if (!activeCollection || activeCollection.tracks.length === 0) return;
+      const tracks = activeCollection.tracks.map(ytResultToTrack);
+      playTrack(tracks, startIndex);
+      setCollectionVisible(false);
+    },
+    [activeCollection, playTrack],
   );
 
   const renderQuickGrid = () => {
@@ -355,7 +456,7 @@ const HomeScreen: React.FC = () => {
                 key={item.videoId}
                 item={item}
                 onPress={() => handleQuickPlay(item)}
-                onLongPress={() => openContextMenu(ytResultToTrack(item))}
+                onLongPress={() => openTrackContextMenu(item)}
               />
             ))}
           </View>
@@ -472,8 +573,14 @@ const HomeScreen: React.FC = () => {
               renderItem={({ item, index }) => (
                 <TrendingCard
                   item={item}
-                  onPress={() => handleTrendingPlay(trendingTracks, index)}
-                  onLongPress={() => openContextMenu(ytResultToTrack(item))}
+                  onPress={() => {
+                    if (!isPlayableResult(item)) {
+                      openCollection(item);
+                      return;
+                    }
+                    handleTrendingPlay(trendingTracks, index);
+                  }}
+                  onLongPress={() => openTrackContextMenu(item)}
                   size={CARD_SIZE}
                 />
               )}
@@ -494,8 +601,8 @@ const HomeScreen: React.FC = () => {
               renderItem={({ item, index }) => (
                 <TrendingCard
                   item={item}
-                  onPress={() => handleSectionPlay(section, index)}
-                  onLongPress={() => openContextMenu(ytResultToTrack(item))}
+                  onPress={() => handleSectionPlay(item)}
+                  onLongPress={() => openTrackContextMenu(item)}
                   size={CARD_SIZE}
                 />
               )}
@@ -518,6 +625,113 @@ const HomeScreen: React.FC = () => {
         visible={menuVisible}
         onClose={closeContextMenu}
       />
+
+      <Modal
+        visible={collectionVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeCollectionModal}
+      >
+        <View style={styles.collectionModalOverlay}>
+          <View
+            style={[
+              styles.collectionModalSheet,
+              {
+                paddingTop: insets.top + Spacing.lg,
+                paddingBottom: Math.max(insets.bottom, Spacing.lg),
+              },
+            ]}
+          >
+            <View style={styles.collectionModalTopBar}>
+              <TouchableOpacity
+                style={styles.collectionCloseBtn}
+                onPress={closeCollectionModal}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="chevron-down" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+              <Text style={styles.collectionTopBarTitle}>
+                {activeCollection?.entityType === 'playlist' ? 'Playlist' : 'Album'}
+              </Text>
+              <View style={styles.collectionTopBarSpacer} />
+            </View>
+
+            {collectionLoading ? (
+              <View style={styles.collectionCenterState}>
+                <ActivityIndicator size="small" color={Colors.textMuted} />
+                <Text style={styles.collectionStateText}>Loading songs...</Text>
+              </View>
+            ) : collectionError && !activeCollection ? (
+              <View style={styles.collectionCenterState}>
+                <Text style={styles.collectionStateText}>{collectionError}</Text>
+              </View>
+            ) : activeCollection ? (
+              <ScrollView
+                style={styles.collectionBody}
+                contentContainerStyle={styles.collectionBodyContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.collectionHero}>
+                  <Image
+                    source={{ uri: activeCollection.artwork }}
+                    style={styles.collectionHeroArtwork}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                  <Text style={styles.collectionTitle}>{activeCollection.title}</Text>
+                  <Text style={styles.collectionSubtitle} numberOfLines={2}>
+                    {activeCollection.artist || activeCollection.subtitle}
+                  </Text>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.collectionPlayButton,
+                      activeCollection.tracks.length === 0 && styles.collectionPlayButtonDisabled,
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => playCollectionFromIndex(0)}
+                    disabled={activeCollection.tracks.length === 0}
+                  >
+                    <Ionicons name="play" size={18} color={Colors.black} />
+                    <Text style={styles.collectionPlayText}>Play</Text>
+                  </TouchableOpacity>
+                  {collectionError ? (
+                    <Text style={styles.collectionInlineError}>{collectionError}</Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.collectionTrackList}>
+                  {activeCollection.tracks.map((track, index) => (
+                    <TouchableOpacity
+                      key={`${track.videoId}-${index}`}
+                      style={styles.collectionTrackRow}
+                      activeOpacity={0.7}
+                      onPress={() => playCollectionFromIndex(index)}
+                      onLongPress={() => openTrackContextMenu(track)}
+                    >
+                      <Text style={styles.collectionTrackIndex}>{index + 1}</Text>
+                      <View style={styles.collectionTrackMeta}>
+                        <Text style={styles.collectionTrackTitle} numberOfLines={1}>
+                          {track.title}
+                        </Text>
+                        <Text style={styles.collectionTrackArtist} numberOfLines={1}>
+                          {track.artist}
+                        </Text>
+                      </View>
+                      <Ionicons name="play" size={16} color={Colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            ) : (
+              <View style={styles.collectionCenterState}>
+                <Text style={styles.collectionStateText}>No collection selected.</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -630,6 +844,143 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.regular,
     color: Colors.textSecondary,
     marginTop: 2,
+  },
+
+  // ---- Collection modal ----
+  collectionModalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  collectionModalSheet: {
+    maxHeight: SCREEN_HEIGHT * 0.9,
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+  },
+  collectionModalTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
+  },
+  collectionCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.glass,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collectionTopBarTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+    color: Colors.textSecondary,
+  },
+  collectionTopBarSpacer: {
+    width: 32,
+  },
+  collectionCenterState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xxxl,
+    paddingHorizontal: Spacing.xl,
+  },
+  collectionStateText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  collectionBody: {
+    flex: 1,
+  },
+  collectionBodyContent: {
+    paddingBottom: Spacing.xl,
+  },
+  collectionHero: {
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+  },
+  collectionHeroArtwork: {
+    width: 180,
+    height: 180,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.surfaceLight,
+    marginBottom: Spacing.md,
+  },
+  collectionTitle: {
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.heavy,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  collectionSubtitle: {
+    marginTop: Spacing.xs,
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+  collectionPlayButton: {
+    marginTop: Spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.round,
+    minWidth: 120,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    gap: 6,
+  },
+  collectionPlayButtonDisabled: {
+    opacity: 0.45,
+  },
+  collectionPlayText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.black,
+  },
+  collectionInlineError: {
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    color: Colors.error,
+    textAlign: 'center',
+  },
+  collectionTrackList: {
+    marginTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.glassBorder,
+  },
+  collectionTrackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.glassBorder,
+  },
+  collectionTrackIndex: {
+    width: 24,
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    textAlign: 'center',
+  },
+  collectionTrackMeta: {
+    flex: 1,
+    marginHorizontal: Spacing.sm,
+  },
+  collectionTrackTitle: {
+    fontSize: FontSize.md,
+    color: Colors.textPrimary,
+    fontWeight: FontWeight.medium,
+  },
+  collectionTrackArtist: {
+    marginTop: 2,
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
   },
 
   // ---- Loading ----

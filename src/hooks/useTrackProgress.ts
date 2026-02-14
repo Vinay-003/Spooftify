@@ -55,13 +55,14 @@ export function useTrackProgress() {
 
     if (
       currentStoreState === 'loading' &&
-      (mapped === 'idle' || mapped === 'stopped')
+      (mapped === 'idle' || mapped === 'stopped') &&
+      activeTrack?.id
     ) {
       return;
     }
 
     setPlaybackState(mapped);
-  }, [playbackState, setPlaybackState]);
+  }, [playbackState, activeTrack?.id, setPlaybackState]);
 
   // Sync active track to store, update currentIndex, record recently played,
   // and trigger prefetch. This is the AUTHORITATIVE source for currentIndex —

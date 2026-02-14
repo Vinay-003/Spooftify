@@ -1,0 +1,12 @@
+{
+  "name": "spooftify-resolver-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "youtubei.js": "^16.0.1"
+  }
+}
