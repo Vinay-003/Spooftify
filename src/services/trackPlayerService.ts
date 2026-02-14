@@ -9,6 +9,7 @@ import TrackPlayer, {
 
 import { Track } from '../types';
 import { prefetchManager } from './prefetchManager';
+import { streamFileCacheManager } from './streamFileCacheManager';
 import type { AudioStreamInfo } from './youtube';
 
 const START_TRACK_RESOLVE_TIMEOUT_MS = 45000;
@@ -118,6 +119,10 @@ export async function addTracksToPlayer(
         START_TRACK_RESOLVE_TIMEOUT_MS,
         `resolving start track ${startTrack.id}`,
       );
+      startStreamInfo = await streamFileCacheManager.resolveForPlayback(
+        startTrack.id,
+        startStreamInfo,
+      );
     }
   } catch (err) {
     console.warn('[addTracksToPlayer] Failed to resolve starting track:', err);
@@ -174,6 +179,7 @@ export async function resolveAndUpdateTrack(
       ACTIVE_TRACK_RESOLVE_TIMEOUT_MS,
       `resolving queue track ${track.id}`,
     );
+    streamInfo = await streamFileCacheManager.resolveForPlayback(track.id, streamInfo);
   } catch (err) {
     console.warn('[TrackPlayer] Failed to resolve YT track, auto-skipping:', err);
     // Auto-skip to next track
@@ -309,34 +315,64 @@ export async function PlaybackService(): Promise<void> {
   // ── Guards to prevent re-entrant resolution ────────────────────────────
   let isResolvingActive = false;
   let isHandlingError = false;
+  let queueSwapTargetId: string | null = null;
   const transientRetries = new Map<string, number>();
   const errorCooldownByTrack = new Map<string, number>();
+  const localRecoveryAttempted = new Set<string>();
+
+  const hotSwapActiveTrack = async (
+    targetId: string,
+    nextTrack: any,
+  ): Promise<boolean> => {
+    const currentActive = await TrackPlayer.getActiveTrack();
+    if (!currentActive || currentActive.id !== targetId) return false;
+
+    const currentIndex = await TrackPlayer.getActiveTrackIndex();
+    if (currentIndex == null) return false;
+
+    queueSwapTargetId = targetId;
+    try {
+      await TrackPlayer.remove(currentIndex);
+      await TrackPlayer.add(nextTrack as any, currentIndex);
+      await TrackPlayer.skip(currentIndex);
+      await TrackPlayer.play();
+      return true;
+    } finally {
+      queueSwapTargetId = null;
+    }
+  };
 
   const resolveActivePlaceholderIfNeeded = async (): Promise<void> => {
     if (isResolvingActive) return;
-
-    const activeTrack = await TrackPlayer.getActiveTrack();
-    if (!activeTrack) return;
-
-    const url = (activeTrack.url as string) ?? '';
-    if (!url.includes('placeholder.invalid')) return;
-
-    const videoId = activeTrack.id as string;
-    if (!videoId) return;
-
-    if (prefetchManager.isBlacklisted(videoId)) {
-      serviceWarn('Resolver', `Skipping blacklisted track ${videoId}`);
-      try { await TrackPlayer.skipToNext(); } catch { /* last track */ }
-      return;
-    }
-
     isResolvingActive = true;
+    let videoId = '';
+    let activeClientUsed: string | undefined;
     try {
+      const activeTrack = await TrackPlayer.getActiveTrack();
+      if (!activeTrack) return;
+
+      const url = (activeTrack.url as string) ?? '';
+      if (!url.includes('placeholder.invalid')) return;
+
+      videoId = (activeTrack.id as string) ?? '';
+      if (!videoId) return;
+      activeClientUsed = (activeTrack as any)?.clientUsed as string | undefined;
+
+      if (prefetchManager.isBlacklisted(videoId)) {
+        serviceWarn('Resolver', `Skipping blacklisted track ${videoId}`);
+        try { await TrackPlayer.skipToNext(); } catch { /* last track */ }
+        return;
+      }
+
       serviceLog('Resolver', `Resolving placeholder for ${videoId}...`);
       const streamInfo = await withTimeout(
         prefetchManager.ensureResolved(videoId),
         ACTIVE_TRACK_RESOLVE_TIMEOUT_MS,
         `resolving active track ${videoId}`,
+      );
+      const playableStreamInfo = await streamFileCacheManager.resolveForPlayback(
+        videoId,
+        streamInfo,
       );
 
       const currentActive = await TrackPlayer.getActiveTrack();
@@ -349,17 +385,50 @@ export async function PlaybackService(): Promise<void> {
 
       serviceLog(
         'Resolver',
-        `Resolved ${videoId}: ${streamInfo.isHLS ? 'HLS' : 'Direct'}, ${Math.round(streamInfo.bitrate / 1000)}kbps, client=${streamInfo.clientUsed ?? 'unknown'}`,
+        `Resolved ${videoId}: ${playableStreamInfo.isHLS ? 'HLS' : 'Direct'}, ${Math.round(playableStreamInfo.bitrate / 1000)}kbps, client=${playableStreamInfo.clientUsed ?? 'unknown'}`,
       );
 
-      const newTrack = buildPlayerTrackFromRaw(currentActive as Record<string, any>, streamInfo);
-      await TrackPlayer.remove(trackIndex);
-      await TrackPlayer.add(newTrack, trackIndex);
-      await TrackPlayer.skip(trackIndex);
-      await TrackPlayer.play();
+      const newTrack = buildPlayerTrackFromRaw(currentActive as Record<string, any>, playableStreamInfo);
+      await hotSwapActiveTrack(videoId, newTrack);
     } catch (err) {
       serviceWarn('Resolver', 'Failed to resolve track on active change', err);
-      try { await TrackPlayer.skipToNext(); } catch { /* no more tracks */ }
+      try {
+        serviceLog('Resolver', `Attempting placeholder re-resolve for ${videoId}...`);
+        const reResolved = await withTimeout(
+          prefetchManager.reResolve(videoId, activeClientUsed),
+          RE_RESOLVE_TIMEOUT_MS,
+          `re-resolving placeholder track ${videoId}`,
+        );
+        const playableStreamInfo = await streamFileCacheManager.resolveForPlayback(
+          videoId,
+          reResolved,
+          {
+            downloadIfMissing: true,
+            downloadTimeoutMs: 12000,
+          },
+        );
+
+        const currentActive = await TrackPlayer.getActiveTrack();
+        if (!currentActive || currentActive.id !== videoId) {
+          return;
+        }
+        const trackIndex = await TrackPlayer.getActiveTrackIndex();
+        if (trackIndex == null) return;
+
+        const newTrack = buildPlayerTrackFromRaw(
+          currentActive as Record<string, any>,
+          playableStreamInfo,
+        );
+        await hotSwapActiveTrack(videoId, newTrack);
+
+        serviceLog(
+          'Resolver',
+          `Re-resolved placeholder ${videoId} with client ${playableStreamInfo.clientUsed ?? 'unknown'}`,
+        );
+      } catch (retryErr) {
+        serviceWarn('Resolver', `Placeholder re-resolve failed for ${videoId}, skipping`, retryErr);
+        try { await TrackPlayer.skipToNext(); } catch { /* no more tracks */ }
+      }
     } finally {
       isResolvingActive = false;
     }
@@ -457,6 +526,46 @@ export async function PlaybackService(): Promise<void> {
         return;
       }
 
+      // Try one local-file fallback before client re-resolution.
+      if (!streamFileCacheManager.isLocalUri(url) && !localRecoveryAttempted.has(videoId)) {
+        localRecoveryAttempted.add(videoId);
+        const cachedStream = prefetchManager.getCached(videoId);
+        if (cachedStream) {
+          const localStream = await streamFileCacheManager.resolveForPlayback(
+            videoId,
+            cachedStream,
+            {
+              downloadIfMissing: true,
+              downloadTimeoutMs: 12000,
+            },
+          );
+
+          if (streamFileCacheManager.isLocalUri(localStream.url)) {
+            const currentActive = await TrackPlayer.getActiveTrack();
+            if (currentActive?.id === videoId) {
+              const currentIndex = await TrackPlayer.getActiveTrackIndex();
+              if (currentIndex != null) {
+                const localTrack = buildPlayerTrackFromRaw(
+                  currentActive as Record<string, any>,
+                  localStream,
+                );
+                await hotSwapActiveTrack(videoId, localTrack);
+                serviceLog(
+                  'ErrorRecovery',
+                  `Switched ${videoId} to local cached audio`,
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // Local cached file failed — evict and continue with re-resolution.
+      if (streamFileCacheManager.isLocalUri(url)) {
+        await streamFileCacheManager.evict(videoId);
+      }
+
       if (isTransientNetworkErrorCode(event.code)) {
         const retries = transientRetries.get(videoId) ?? 0;
         if (retries < 1) {
@@ -483,6 +592,14 @@ export async function PlaybackService(): Promise<void> {
           RE_RESOLVE_TIMEOUT_MS,
           `re-resolving errored track ${videoId}`,
         );
+        const playableStreamInfo = await streamFileCacheManager.resolveForPlayback(
+          videoId,
+          newStreamInfo,
+          {
+            downloadIfMissing: true,
+            downloadTimeoutMs: 12000,
+          },
+        );
 
         // Verify we're still on the same active track (user might have skipped/changed queue)
         const currentActive = await TrackPlayer.getActiveTrack();
@@ -491,16 +608,16 @@ export async function PlaybackService(): Promise<void> {
         if (currentIndex == null) return;
 
         // Hot-swap: remove broken track, re-add with new URL, play
-        const newTrack = buildPlayerTrackFromRaw(currentActive as Record<string, any>, newStreamInfo);
-        await TrackPlayer.remove(currentIndex);
-        await TrackPlayer.add(newTrack, currentIndex);
-        await TrackPlayer.skip(currentIndex);
-        await TrackPlayer.play();
+        const newTrack = buildPlayerTrackFromRaw(
+          currentActive as Record<string, any>,
+          playableStreamInfo,
+        );
+        await hotSwapActiveTrack(videoId, newTrack);
         transientRetries.delete(videoId);
 
         serviceLog(
           'ErrorRecovery',
-          `Re-resolved ${videoId} with client ${newStreamInfo.clientUsed ?? 'unknown'}`,
+          `Re-resolved ${videoId} with client ${playableStreamInfo.clientUsed ?? 'unknown'}`,
         );
       } catch (retryErr) {
         serviceWarn(
@@ -528,9 +645,19 @@ export async function PlaybackService(): Promise<void> {
 
       const url = track.url as string;
       const videoId = track.id as string;
+
+      if (queueSwapTargetId && videoId && videoId !== queueSwapTargetId) {
+        serviceLog(
+          'ActiveTrack',
+          `Ignoring transient ActiveTrackChanged to ${videoId} during swap for ${queueSwapTargetId}`,
+        );
+        return;
+      }
+
       if (videoId) {
         transientRetries.delete(videoId);
         errorCooldownByTrack.delete(videoId);
+        localRecoveryAttempted.delete(videoId);
       }
 
       // Log every active track change for diagnostics

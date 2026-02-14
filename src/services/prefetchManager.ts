@@ -18,6 +18,7 @@
  */
 
 import { resolveStreamUrl, type AudioStreamInfo } from './youtube';
+import { streamFileCacheManager } from './streamFileCacheManager';
 
 interface CacheEntry {
   streamInfo: AudioStreamInfo;
@@ -88,6 +89,7 @@ class PrefetchManager {
         streamInfo,
         resolvedAt: Date.now(),
       });
+      streamFileCacheManager.prime(videoId, streamInfo);
       return streamInfo;
     } finally {
       this.pendingResolves.delete(videoId);
@@ -154,6 +156,7 @@ class PrefetchManager {
         streamInfo,
         resolvedAt: Date.now(),
       });
+      streamFileCacheManager.prime(videoId, streamInfo);
       // Successful re-resolve resets consecutive failure counter.
       this.retryCount.delete(videoId);
       return streamInfo;

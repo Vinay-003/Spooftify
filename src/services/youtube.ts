@@ -15,6 +15,7 @@
 import Innertube, { Platform } from 'youtubei.js';
 import { Platform as RNPlatform } from 'react-native';
 import type { Track } from '../types';
+import { resolveJioSaavnFallback } from './jiosaavn';
 
 type InnerTubeClient = 'IOS' | 'WEB' | 'MWEB' | 'ANDROID' | 'YTMUSIC' | 'YTMUSIC_ANDROID' | 'YTSTUDIO_ANDROID' | 'TV' | 'TV_SIMPLY' | 'TV_EMBEDDED' | 'YTKIDS' | 'WEB_EMBEDDED' | 'WEB_CREATOR';
 
@@ -145,6 +146,12 @@ export interface AudioStreamInfo {
 
 const BACKEND_RESOLVER_URL = (process.env.EXPO_PUBLIC_RESOLVER_URL ?? '').trim();
 const BACKEND_CLIENT_PREFIX = 'BACKEND:';
+interface FallbackMeta {
+  title: string;
+  artist: string;
+  durationSeconds: number;
+}
+const fallbackMetaCache = new Map<string, FallbackMeta>();
 
 export interface YTHomeSection {
   title: string;
@@ -538,6 +545,19 @@ async function resolveStreamViaBackend(
     throw new Error('Backend resolver URL is not configured');
   }
 
+  const backendExcludeClients = Array.from(
+    new Set(
+      (excludeClients ?? [])
+        .map((client) => client.toUpperCase())
+        .map((client) =>
+          client.startsWith(BACKEND_CLIENT_PREFIX)
+            ? client.slice(BACKEND_CLIENT_PREFIX.length)
+            : client,
+        )
+        .filter(Boolean),
+    ),
+  );
+
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), 18000);
 
@@ -549,9 +569,7 @@ async function resolveStreamViaBackend(
       },
       body: JSON.stringify({
         videoId,
-        excludeClients: (excludeClients ?? []).filter(
-          (client) => !client.toUpperCase().startsWith(BACKEND_CLIENT_PREFIX),
-        ),
+        excludeClients: backendExcludeClients,
       }),
       signal: controller.signal,
     });
@@ -921,11 +939,83 @@ export async function resolveStreamUrl(
   }
 
   const excluded = new Set(excludeClients?.map((c) => c.toUpperCase()) ?? []);
-  const shouldSkipBackend = Array.from(excluded).some((c) =>
-    c.startsWith(BACKEND_CLIENT_PREFIX),
-  );
 
-  if (BACKEND_RESOLVER_URL && !shouldSkipBackend) {
+  const yt = await getInnertube();
+  const clientOrder = getClientOrder();
+
+  const getVideoMetaForFallback = async (): Promise<FallbackMeta | null> => {
+    const cached = fallbackMetaCache.get(videoId);
+    if (cached) return cached;
+
+    const metadataClients: InnerTubeClient[] = ['WEB', 'IOS', 'ANDROID'];
+    for (const metadataClient of metadataClients) {
+      try {
+        const info = await yt.getBasicInfo(videoId, { client: metadataClient });
+        const title = toPlainText((info as any)?.basic_info?.title);
+        if (!title) continue;
+        const meta = {
+          title,
+          artist: toPlainText((info as any)?.basic_info?.author),
+          durationSeconds: parseDurationSeconds((info as any)?.basic_info?.duration),
+        };
+        fallbackMetaCache.set(videoId, meta);
+        return meta;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
+
+  const tryClient = async (client: InnerTubeClient): Promise<AudioStreamInfo | null> => {
+    if (excluded.has(client)) return null;
+    try {
+      return await tryClientForStream(yt, videoId, client);
+    } catch (err: any) {
+      console.warn(`[YT] Client ${client} failed for ${videoId}:`, err?.message ?? err);
+      return null;
+    }
+  };
+
+  // Priority order requested:
+  //   1) IOS
+  //   2) JioSaavn fallback
+  //   3) Remaining YouTube clients
+  const iosResult = await tryClient('IOS');
+  if (iosResult) return iosResult;
+
+  if (!excluded.has('JIOSAAVN')) {
+    try {
+      const meta = await getVideoMetaForFallback();
+      if (meta) {
+        console.log(
+          `[YT] Trying JioSaavn fallback for ${videoId} using "${meta.title}"`,
+        );
+        const saavnResult = await resolveJioSaavnFallback({
+          title: meta.title,
+          artist: meta.artist,
+          durationSeconds: meta.durationSeconds,
+        });
+        if (saavnResult) {
+          console.log(`[YT] JioSaavn fallback selected for ${videoId}`);
+          return saavnResult;
+        }
+        console.log(`[YT] JioSaavn fallback had no match for ${videoId}`);
+      } else {
+        console.log(`[YT] JioSaavn fallback skipped for ${videoId}: no metadata`);
+      }
+    } catch (err: any) {
+      console.warn(`[YT] JioSaavn fallback failed for ${videoId}:`, err?.message ?? err);
+    }
+  }
+
+  for (const client of clientOrder) {
+    if (client === 'IOS') continue;
+    const result = await tryClient(client);
+    if (result) return result;
+  }
+
+  if (BACKEND_RESOLVER_URL) {
     try {
       const backendStream = await resolveStreamViaBackend(videoId, excludeClients);
       console.log(
@@ -934,23 +1024,9 @@ export async function resolveStreamUrl(
       return backendStream;
     } catch (err: any) {
       console.warn(
-        `[YT] Backend resolver failed for ${videoId}, falling back to local resolver:`,
+        `[YT] Backend resolver failed for ${videoId}:`,
         err?.message ?? err,
       );
-    }
-  }
-
-  const yt = await getInnertube();
-  const clientOrder = getClientOrder();
-
-  for (const client of clientOrder) {
-    if (excluded.has(client)) continue;
-    try {
-      const result = await tryClientForStream(yt, videoId, client);
-      if (result) return result;
-    } catch (err: any) {
-      console.warn(`[YT] Client ${client} failed for ${videoId}:`, err?.message ?? err);
-      continue;
     }
   }
 
@@ -968,6 +1044,12 @@ export function ytResultToTrack(result: YTSearchResult): Track {
     throw new Error(`Result is not playable: ${result.videoId}`);
   }
 
+  fallbackMetaCache.set(result.videoId, {
+    title: result.title,
+    artist: result.artist,
+    durationSeconds: result.duration,
+  });
+
   return {
     id: result.videoId,
     title: result.title,
@@ -977,6 +1059,7 @@ export function ytResultToTrack(result: YTSearchResult): Track {
     url: '', // resolved later
     duration: result.duration,
     isYT: true,
+    source: 'youtube',
   };
 }
 

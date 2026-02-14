@@ -8,6 +8,7 @@ export interface Track {
   duration: number; // seconds
   lyrics?: LyricLine[];
   isYT?: boolean; // true if this track streams from YouTube
+  source?: 'youtube' | 'jiosaavn' | 'local';
 }
 
 export interface LyricLine {

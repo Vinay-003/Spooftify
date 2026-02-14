@@ -16,6 +16,7 @@ import { Colors, Spacing, FontSize, FontWeight, BorderRadius, Shadows } from '..
 import { TrackRow } from '../../components/common';
 import { usePlayer } from '../../hooks';
 import { searchYTMusic, getSearchSuggestions, ytResultToTrack } from '../../services/youtube';
+import { jioSaavnResultToTrack, searchJioSaavnSongs } from '../../services/jiosaavn';
 import type { Track } from '../../types';
 
 // Category type for browse tiles (local, no longer in shared types)
@@ -111,9 +112,22 @@ export default function SearchScreen() {
     Keyboard.dismiss();
 
     try {
-      const results = await searchYTMusic(searchQuery);
-      const tracks = results.map(ytResultToTrack);
-      setSearchResults(tracks);
+      const [ytResponse, saavnResponse] = await Promise.allSettled([
+        searchYTMusic(searchQuery),
+        searchJioSaavnSongs(searchQuery, 15),
+      ]);
+
+      const ytTracks =
+        ytResponse.status === 'fulfilled'
+          ? ytResponse.value.map(ytResultToTrack)
+          : [];
+      const saavnTracks =
+        saavnResponse.status === 'fulfilled'
+          ? saavnResponse.value.map(jioSaavnResultToTrack)
+          : [];
+
+      // Keep YouTube first, then JioSaavn as secondary source.
+      setSearchResults([...ytTracks, ...saavnTracks]);
     } catch (err) {
       console.warn('[Search] Failed:', err);
       setSearchResults([]);
