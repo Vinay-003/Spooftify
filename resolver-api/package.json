@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
+  "scripts": {
+    "dev": "vercel dev",
+    "local": "node local-server.js"
+  },
   "engines": {
     "node": "20.x"
   },

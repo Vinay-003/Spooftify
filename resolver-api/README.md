@@ -2,6 +2,20 @@
 
 Serverless resolver that returns a playable YouTube audio stream URL for a `videoId`.
 
+## Run Locally (Node.js)
+
+1. Install dependencies:
+   - `cd resolver-api`
+   - `npm install`
+2. Start local Node server:
+   - `npm run local`
+3. Test endpoints:
+   - `curl http://localhost:3000/api/health`
+   - `curl -X POST http://localhost:3000/api/resolve -H "Content-Type: application/json" -d '{"videoId":"dQw4w9WgXcQ"}'`
+
+If testing from a physical Android phone, use your laptop LAN IP instead of `localhost`, for example:
+- `http://192.168.1.20:3000/api/resolve`
+
 ## Endpoints
 
 - `GET /api/health`

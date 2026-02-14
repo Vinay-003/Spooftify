@@ -144,6 +144,7 @@ export interface AudioStreamInfo {
 }
 
 const BACKEND_RESOLVER_URL = (process.env.EXPO_PUBLIC_RESOLVER_URL ?? '').trim();
+const BACKEND_CLIENT_PREFIX = 'BACKEND:';
 
 export interface YTHomeSection {
   title: string;
@@ -515,6 +516,8 @@ function normalizeStreamInfoFromBackend(payload: any): AudioStreamInfo {
     throw new Error('Resolver returned empty stream URL');
   }
 
+  const backendClient = toPlainText(payload.clientUsed) || 'UNKNOWN';
+
   return {
     url,
     mimeType: toPlainText(payload.mimeType) || 'application/octet-stream',
@@ -523,7 +526,7 @@ function normalizeStreamInfoFromBackend(payload: any): AudioStreamInfo {
     expiresAt: Number(payload.expiresAt ?? Date.now() + 5 * 60 * 60 * 1000),
     headers: normalizeStreamHeaders(payload.headers),
     isHLS: Boolean(payload.isHLS),
-    clientUsed: toPlainText(payload.clientUsed) || 'BACKEND',
+    clientUsed: `${BACKEND_CLIENT_PREFIX}${backendClient}`,
   };
 }
 
@@ -546,7 +549,9 @@ async function resolveStreamViaBackend(
       },
       body: JSON.stringify({
         videoId,
-        excludeClients: excludeClients ?? [],
+        excludeClients: (excludeClients ?? []).filter(
+          (client) => !client.toUpperCase().startsWith(BACKEND_CLIENT_PREFIX),
+        ),
       }),
       signal: controller.signal,
     });
@@ -915,7 +920,12 @@ export async function resolveStreamUrl(
     throw new Error(`Invalid YouTube video id: ${videoId}`);
   }
 
-  if (BACKEND_RESOLVER_URL) {
+  const excluded = new Set(excludeClients?.map((c) => c.toUpperCase()) ?? []);
+  const shouldSkipBackend = Array.from(excluded).some((c) =>
+    c.startsWith(BACKEND_CLIENT_PREFIX),
+  );
+
+  if (BACKEND_RESOLVER_URL && !shouldSkipBackend) {
     try {
       const backendStream = await resolveStreamViaBackend(videoId, excludeClients);
       console.log(
@@ -931,7 +941,6 @@ export async function resolveStreamUrl(
   }
 
   const yt = await getInnertube();
-  const excluded = new Set(excludeClients?.map((c) => c.toUpperCase()) ?? []);
   const clientOrder = getClientOrder();
 
   for (const client of clientOrder) {
